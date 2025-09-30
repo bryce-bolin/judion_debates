@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Judion</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Inter', sans-serif; }
+    :root { --bg:#000; --text:#fff; --muted:#aaa; }
+    html, body { height:100%; background:var(--bg); color:var(--text); }
+    a, .btn-link { color:var(--text); }
+    #sidebar { height:100vh; overflow-y:auto; background:#111; border-right:1px solid #444; }
+    #main { height:100vh; overflow-y:auto; padding:1rem 1.25rem; background:#000; }
+    .brand { font-weight:800; font-size:1.2rem; color:var(--text); }
+
+    .icon {
+      width:20px; height:20px;
+      display:inline-block;
+      margin-right:8px;
+      vertical-align:-3px;
+      color:#fff;
+    }
+    .icon path, .icon circle, .icon line {
+      stroke:currentColor;
+      fill:none;
+      stroke-width:2;
+      stroke-linecap:round;
+      stroke-linejoin:round;
+      vector-effect:non-scaling-stroke;
+    }
+
+    /* Both buttons white */
+    .btn-primary, .btn-secondary {
+      background:#fff; color:#000; border:none;
+    }
+    .btn-primary:hover, .btn-secondary:hover {
+      background:#eaeaea; color:#000;
+    }
+
+    .chat-item { background:#1a1a1a; border:1px solid #333; color:var(--text); position:relative; }
+    .chat-item small { color:var(--muted); }
+    .divider { border-color:#444; }
+    .muted { color:var(--muted); }
+    input, textarea { background:#111 !important; color:var(--text) !important; border:1px solid #444 !important; }
+
+    /* Delete button */
+    .delete-form { position:absolute; top:4px; right:6px; }
+    .delete-form button {
+      background:none; border:none; color:#888; font-size:14px; line-height:1; padding:0; cursor:pointer;
+    }
+    .delete-form button:hover { color:#f55; }
+  </style>
+</head>
+<body>
+  <div class="container-fluid h-100">
+    <div class="row h-100">
+
+      <!-- Sidebar -->
+      <aside id="sidebar" class="col-12 col-md-4 col-lg-3 p-3">
+        <div class="d-flex align-items-center justify-content-between mb-3">
+          <div class="brand">Judion</div>
+          {% if session.get('username') %}
+            <span class="muted">Hi, {{ session['username'] }}</span>
+          {% endif %}
+        </div>
+
+        {% if session.get('username') %}
+          <!-- Show create buttons only when logged in -->
+          <form class="mb-2" onsubmit="event.preventDefault(); document.getElementById('debateForm').style.display='block';">
+            <button class="btn btn-primary w-100" type="submit">+ Debate Chat</button>
+          </form>
+          <form action="{{ url_for('create_solo') }}" method="post" class="mb-3" id="soloForm">
+            <button class="btn btn-secondary w-100">+ Solo Chat</button>
+          </form>
+
+          <hr class="divider">
+
+          {% if chats %}
+            <div class="mt-3">
+              {% for chat in chats %}
+                <div class="chat-item mb-2 p-2 rounded">
+                  <!-- Delete button -->
+                  <form action="{{ url_for('delete_chat', chat_id=(chat.code if chat.type=='debate' else chat.sid)) }}"
+                        method="post" class="delete-form"
+                        onsubmit="return confirm('Delete this chat?');">
+                    <button type="submit" title="Delete">✕</button>
+                  </form>
+
+                  <a href="{% if chat.type=='debate' %}{{ url_for('debate_room', code=chat.code) }}{% else %}{{ url_for('solo_room', sid=chat.sid) }}{% endif %}"
+                     class="text-decoration-none text-light d-block">
+                    <div class="d-flex justify-content-between align-items-center">
+                      <div class="d-flex align-items-center">
+                        {% if chat.type == 'debate' %}
+                          <!-- debate icon -->
+                          <svg viewBox="0 0 24 24" class="icon" aria-hidden="true">
+                            <path d="M16 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                            <circle cx="9" cy="7" r="4"/>
+                            <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
+                            <path d="M16 3.13A4 4 0 0 1 19 7"/>
+                          </svg>
+                        {% else %}
+                          <!-- solo icon -->
+                          <svg viewBox="0 0 24 24" class="icon" aria-hidden="true">
+                            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                            <circle cx="12" cy="7" r="4"/>
+                          </svg>
+                        {% endif %}
+                        <strong>{{ chat.title }}</strong>
+                      </div>
+                      {% if chat.code %}
+                        <small>Code: {{ chat.code }}</small>
+                      {% endif %}
+                    </div>
+                    {% if chat.description %}
+                      <div class="small muted mt-1">{{ chat.description }}</div>
+                    {% endif %}
+                  </a>
+                </div>
+              {% endfor %}
+            </div>
+          {% else %}
+            <p class="muted mt-3">No chats yet. Create one above.</p>
+          {% endif %}
+        {% else %}
+          <!-- Not logged in: keep sidebar minimal -->
+          <p class="muted">Please log in to create or view chats.</p>
+        {% endif %}
+      </aside>
+
+      <!-- Main -->
+      <main id="main" class="col-12 col-md-8 col-lg-9">
+        {% block content %}{% endblock %}
+      </main>
+    </div>
+  </div>
+</body>
+</html>

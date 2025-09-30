@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex justify-content-center align-items-center h-100">
+  <form method="post" class="w-100" style="max-width:480px;">
+    <h2 class="mb-3">Welcome to Judion</h2>
+    <p class="muted mb-4">Settle arguments and challenges quickly and fairly.</p>
+    <label class="form-label">Username</label>
+    <input type="text" name="username" class="form-control mb-3" placeholder="Choose a display name" required>
+    <button type="submit" class="btn btn-primary w-100">Continue</button>
+  </form>
+</div>
+{% endblock %}

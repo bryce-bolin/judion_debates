@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .chat-wrap { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; height: 100%; }
+  #messages { flex: 1; overflow-y: auto; padding-bottom: 96px; }
+
+  .row-user   { display:flex; justify-content:flex-end; }
+  .row-assist { display:flex; justify-content:flex-start; }
+
+  .bubble { padding:.75rem 1rem; border-radius: 12px; border:1px solid #333; max-width: 90%; }
+  .bubble-user   { background:#1b1b1b; border-color:#2d2d2d; }
+  .bubble-assist { background:#121212; border-color:#2a2a2a; }
+
+  .meta { color:#aaa; font-size:.8rem; margin-bottom:.25rem; }
+  .composer { position: sticky; bottom: 0; background:#000; padding:.5rem 0; z-index:10; border-top:1px solid #222; }
+</style>
+
+<div class="chat-wrap">
+  <div class="mb-3">
+    <h3 class="mb-1">{{ room.title }}</h3>
+    {% if room.description %}<p class="muted mb-2">{{ room.description }}</p>{% endif %}
+    <p class="small text-secondary">Room code: <strong>{{ room.code }}</strong></p>
+  </div>
+
+  <div id="messages">
+    {% for m in messages %}
+      {% set role = (m.role if m.role else 'assistant') %}
+      {% set is_user = (role == 'user' and m.user == session['username']) %}
+      <div class="{{ 'row-user' if is_user else 'row-assist' }} mb-2">
+        <div class="bubble {{ 'bubble-user' if is_user else 'bubble-assist' }}">
+          <div class="meta"><strong>{{ m.user if m.user else 'AI' }}</strong></div>
+          <!-- Render messages with Markdown -->
+          <div>{{ m.text | markdown | safe }}</div>
+        </div>
+      </div>
+    {% else %}
+      <div class="muted">No messages yet. Be the first to post an argument.</div>
+    {% endfor %}
+  </div>
+
+  <form class="composer" action="{{ url_for('debate_message', code=room.code) }}" method="post">
+    <label class="form-label">Message</label>
+    <textarea name="text" rows="3" class="form-control mb-2" placeholder="Write an argument or counterargument…"></textarea>
+    <button class="btn btn-primary">Send</button>
+  </form>
+</div>
+
+<script>
+  const form = document.querySelector(".composer");
+  const textarea = form.querySelector("textarea");
+  form.addEventListener("submit", function() {
+    // Show "AI is typing..." bubble
+    const messages = document.getElementById("messages");
+    const bubble = document.createElement("div");
+    bubble.className = "row-assist mb-2";
+    bubble.innerHTML = `
+      <div class="bubble bubble-assist">
+        <div class="meta"><strong>AI</strong></div>
+        <div><em>AI is typing...</em></div>
+      </div>`;
+    messages.appendChild(bubble);
+    messages.scrollTop = messages.scrollHeight;
+  });
+</script>
+{% endblock %}

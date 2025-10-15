@@ -4,9 +4,11 @@
   .chat-wrap { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; height: 100%; }
   #messages { flex: 1; overflow-y: auto; padding-bottom: 96px; }
 
+  /* Alignment: me on right, judge/others on left */
   .row-user   { display:flex; justify-content:flex-end; }
   .row-assist { display:flex; justify-content:flex-start; }
 
+  /* Neutral dark bubbles */
   .bubble { padding:.75rem 1rem; border-radius: 12px; border:1px solid #333; max-width: 90%; }
   .bubble-user   { background:#1b1b1b; border-color:#2d2d2d; }
   .bubble-assist { background:#121212; border-color:#2a2a2a; }
@@ -28,7 +30,7 @@
       {% set is_user = (role == 'user' and m.user == session['username']) %}
       <div class="{{ 'row-user' if is_user else 'row-assist' }} mb-2">
         <div class="bubble {{ 'bubble-user' if is_user else 'bubble-assist' }}">
-          <div class="meta"><strong>{{ m.user if m.user else 'AI' }}</strong></div>
+          <div class="meta"><strong>{{ m.user if m.user else 'Judge' }}</strong></div>
           <!-- Render messages with Markdown -->
           <div>{{ m.text | markdown | safe }}</div>
         </div>
@@ -46,19 +48,24 @@
 </div>
 
 <script>
-  const form = document.querySelector(".composer");
-  const textarea = form.querySelector("textarea");
-  form.addEventListener("submit", function() {
-    // Show "AI is typing..." bubble
+  // Scroll to bottom on load
+  (function() {
     const messages = document.getElementById("messages");
-    const bubble = document.createElement("div");
-    bubble.className = "row-assist mb-2";
-    bubble.innerHTML = `
+    messages.scrollTop = messages.scrollHeight;
+  })();
+
+  // Show a temporary "Judge is typing…" bubble after submit
+  const form = document.querySelector(".composer");
+  form.addEventListener("submit", function() {
+    const messages = document.getElementById("messages");
+    const wrap = document.createElement("div");
+    wrap.className = "row-assist mb-2";
+    wrap.innerHTML = `
       <div class="bubble bubble-assist">
-        <div class="meta"><strong>AI</strong></div>
-        <div><em>AI is typing...</em></div>
+        <div class="meta"><strong>Judge</strong></div>
+        <div><em>Judge is typing…</em></div>
       </div>`;
-    messages.appendChild(bubble);
+    messages.appendChild(wrap);
     messages.scrollTop = messages.scrollHeight;
   });
 </script>

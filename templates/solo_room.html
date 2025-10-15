@@ -28,7 +28,6 @@
       <div class="{{ 'row-user' if is_user else 'row-assist' }} mb-2">
         <div class="bubble {{ 'bubble-user' if is_user else 'bubble-assist' }}">
           <div class="meta"><strong>{{ m.user if m.user else 'AI' }}</strong></div>
-          <!-- Render messages with Markdown -->
           <div>{{ m.text | markdown | safe }}</div>
         </div>
       </div>
@@ -39,29 +38,35 @@
 
   <form class="composer" action="{{ url_for('solo_message', sid=room.sid) }}" method="post">
     <label class="form-label">Message</label>
-    <textarea name="text" rows="3" class="form-control mb-2" placeholder="Send a message…"></textarea>
+    <textarea name="text" rows="3" class="form-control mb-2" placeholder="Send a message…" autofocus></textarea>
     <button class="btn btn-primary">Send</button>
   </form>
 </div> 
 
 <script>
-  const form = document.querySelector(".composer");
-  const textarea = form.querySelector("textarea");
-  form.addEventListener("submit", function() {
-    // Create fake "AI is typing..." bubble
+  // Auto-scroll to bottom on load
+  (function () {
     const messages = document.getElementById("messages");
-    const bubble = document.createElement("div");
-    bubble.className = "row-assist mb-2";
-    bubble.innerHTML = `
+    messages.scrollTop = messages.scrollHeight;
+  })();
+
+  // Add a single "AI is typing…" bubble on submit
+  const form = document.querySelector(".composer");
+  let typingAdded = false;
+  form.addEventListener("submit", function () {
+    if (typingAdded) return;
+    typingAdded = true;
+
+    const messages = document.getElementById("messages");
+    const wrap = document.createElement("div");
+    wrap.className = "row-assist mb-2";
+    wrap.innerHTML = `
       <div class="bubble bubble-assist">
         <div class="meta"><strong>AI</strong></div>
-        <div><em>AI is typing...</em></div>
+        <div><em>AI is typing…</em></div>
       </div>`;
-    messages.appendChild(bubble);
-
-    // Scroll to bottom
+    messages.appendChild(wrap);
     messages.scrollTop = messages.scrollHeight;
   });
 </script>
-
 {% endblock %}

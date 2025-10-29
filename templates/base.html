@@ -54,6 +54,33 @@
   </style>
 </head>
 <body>
+  <!-- Top Navigation -->
+<nav class="navbar navbar-dark bg-dark px-3">
+  <a class="navbar-brand fw-bold text-white" href="{{ url_for('main') }}">Judion</a>
+  <div class="ms-auto">
+    {% if current_user.is_authenticated %}
+      <span class="text-white me-3">Hi, {{ current_user.username }}</span>
+      <a href="{{ url_for('logout') }}" class="btn btn-sm btn-outline-light">Logout</a>
+    {% else %}
+      <a href="{{ url_for('login') }}" class="btn btn-sm btn-outline-light me-2">Login</a>
+      <a href="{{ url_for('signup') }}" class="btn btn-sm btn-primary">Sign up</a>
+    {% endif %}
+  </div>
+</nav>
+
+<!-- Flash Messages -->
+<div class="container mt-3" style="max-width:720px;">
+  {% with msgs = get_flashed_messages(with_categories=True) %}
+    {% if msgs %}
+      {% for cat, msg in msgs %}
+        <div class="alert alert-{{ 'danger' if cat=='danger' else cat }} mb-2" role="alert">
+          {{ msg }}
+        </div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+</div>
+
   <div class="container-fluid h-100">
     <div class="row h-100">
 
@@ -61,16 +88,35 @@
       <aside id="sidebar" class="col-12 col-md-4 col-lg-3 p-3">
         <div class="d-flex align-items-center justify-content-between mb-3">
           <div class="brand">Judion</div>
-          {% if session.get('username') %}
-            <span class="muted">Hi, {{ session['username'] }}</span>
+          {% if current_user.is_authenticated %}
+            <span class="muted">Hi, {{ current_user.username }}</span>
           {% endif %}
         </div>
 
-        {% if session.get('username') %}
-          <!-- Show create buttons only when logged in -->
-          <form class="mb-2" onsubmit="event.preventDefault(); document.getElementById('debateForm').style.display='block';">
+        {% if current_user.is_authenticated %}
+          <!-- Toggle button reveals the inline form below -->
+          <form class="mb-2" onsubmit="event.preventDefault(); document.getElementById('debateForm').classList.toggle('d-none');">
             <button class="btn btn-primary w-100" type="submit">+ Debate Chat</button>
           </form>
+
+          <!-- Inline Debate Create Form (hidden by default) -->
+          <form id="debateForm" action="{{ url_for('create_debate') }}" method="post" class="mb-3 d-none">
+            <div class="mb-2">
+              <label class="form-label">Title *</label>
+              <input name="title" class="form-control" placeholder="e.g., Is AI good for education?" required>
+            </div>
+            <div class="mb-2">
+              <label class="form-label">Description (optional)</label>
+              <textarea name="description" class="form-control" rows="2" placeholder="Context or rules…"></textarea>
+            </div>
+            <div class="mb-2">
+              <label class="form-label">Custom Code (optional)</label>
+              <input name="code" class="form-control" placeholder="Leave blank to auto-generate">
+            </div>
+            <button class="btn btn-secondary w-100" type="submit">Create Debate</button>
+          </form>
+
+          <!-- Solo create stays as-is -->
           <form action="{{ url_for('create_solo') }}" method="post" class="mb-3" id="soloForm">
             <button class="btn btn-secondary w-100">+ Solo Chat</button>
           </form>
@@ -89,7 +135,7 @@
                   </form>
 
                   <a href="{% if chat.type=='debate' %}{{ url_for('debate_room', code=chat.code) }}{% else %}{{ url_for('solo_room', sid=chat.sid) }}{% endif %}"
-                     class="text-decoration-none text-light d-block">
+                    class="text-decoration-none text-light d-block">
                     <div class="d-flex justify-content-between align-items-center">
                       <div class="d-flex align-items-center">
                         {% if chat.type == 'debate' %}

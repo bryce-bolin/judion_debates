@@ -23,8 +23,7 @@
 
   <div id="messages">
     {% for m in messages %}
-      {% set role = (m.role if m.role else 'assistant') %}
-      {% set is_user = (role == 'user' and m.user == session['username']) %}
+      {% set is_user = (m.role == 'user' and m.user == current_user.username) %}
       <div class="{{ 'row-user' if is_user else 'row-assist' }} mb-2">
         <div class="bubble {{ 'bubble-user' if is_user else 'bubble-assist' }}">
           <div class="meta"><strong>{{ m.user if m.user else 'AI' }}</strong></div>
@@ -49,24 +48,123 @@
     const messages = document.getElementById("messages");
     messages.scrollTop = messages.scrollHeight;
   })();
+</script>
 
-  // Add a single "AI is typing…" bubble on submit
-  const form = document.querySelector(".composer");
-  let typingAdded = false;
-  form.addEventListener("submit", function () {
-    if (typingAdded) return;
-    typingAdded = true;
+<script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
+<script>
+(() => {
+  const socket = io();
+  const roomKey = "solo:{{ room.sid }}";
+  socket.emit("join", { room: roomKey });
 
-    const messages = document.getElementById("messages");
+  const messagesDiv = document.getElementById("messages");
+  const composerForm = document.querySelector(".composer");
+  const textarea = composerForm.querySelector("textarea");
+
+  // Helper: escape & line-breaks
+  function safeHTML(s) {
+    return (s || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/\n/g, "<br>");
+  }
+
+  // Helper: append one chat bubble
+  function appendBubble(msg, isMine, opts = {}) {
+    const row = document.createElement("div");
+    row.className = (isMine ? "row-user" : "row-assist") + " mb-2";
+    const pendingAttr = opts.pending ? ' data-pending="1"' : '';
+    row.innerHTML = `
+      <div class="bubble ${isMine ? "bubble-user" : "bubble-assist"}"${pendingAttr}>
+        <div class="meta"><strong>${msg.user || "AI"}</strong></div>
+        <div class="content">${safeHTML(msg.text)}</div>
+      </div>
+    `;
+    messagesDiv.appendChild(row);
+    messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    return row;
+  }
+
+  // Remove any visible typing bubble(s)
+  function removeTyping() {
+    document.querySelectorAll('[data-typing="1"]').forEach(el => {
+      const row = el.closest(".mb-2") || el;
+      row.remove();
+    });
+  }
+
+  // Try to resolve an optimistic (pending) bubble for this user & text
+  function resolvePendingFor(text) {
+    const pending = messagesDiv.querySelectorAll('.bubble[data-pending="1"] .content');
+    for (const el of pending) {
+      if (el.innerHTML === safeHTML(text)) {
+        el.closest('.bubble').removeAttribute('data-pending');
+        return true; // found & resolved
+      }
+    }
+    return false;
+  }
+
+  // SOCKET: server-sent messages (user echo or AI)
+  socket.on("new_message", (msg) => {
+    // If it's me and matches my pending bubble, don't duplicate — just resolve it.
+    if (msg.user === "{{ current_user.username }}") {
+      if (resolvePendingFor(msg.text)) {
+        // It was an echo of my message; we already showed it.
+        return;
+      }
+    }
+    // For AI or other users, ensure typing indicator is removed before append
+    removeTyping();
+    appendBubble(msg, msg.user === "{{ current_user.username }}");
+  });
+
+  // INTERCEPT FORM SUBMIT: optimistic add + typing + POST via fetch
+  composerForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const text = (textarea.value || "").trim();
+    if (!text) return;
+
+    // 1) Optimistic: show MY message immediately as pending (no duplicate later)
+    appendBubble({ user: "{{ current_user.username }}", text }, true, { pending: true });
+
+    // 2) Show exactly one "AI is typing…" bubble
+    removeTyping();
     const wrap = document.createElement("div");
     wrap.className = "row-assist mb-2";
     wrap.innerHTML = `
-      <div class="bubble bubble-assist">
+      <div class="bubble bubble-assist" data-typing="1">
         <div class="meta"><strong>AI</strong></div>
         <div><em>AI is typing…</em></div>
       </div>`;
-    messages.appendChild(wrap);
-    messages.scrollTop = messages.scrollHeight;
+    messagesDiv.appendChild(wrap);
+    messagesDiv.scrollTop = messagesDiv.scrollHeight;
+
+    // 3) Send to server via fetch (no page reload)
+    try {
+      const fd = new FormData();
+      fd.append("text", text);
+      await fetch(composerForm.action, { method: "POST", body: fd, credentials: "same-origin" });
+      // server will emit:
+      //  - echo of my message -> resolvePendingFor
+      //  - AI message -> removeTyping + appendBubble
+    } catch (err) {
+      // If the POST failed, mark the pending bubble as failed (optional)
+      const lastPending = messagesDiv.querySelector('.bubble[data-pending="1"] .content');
+      if (lastPending) {
+        lastPending.innerHTML += '<br><span style="color:#f66;">(send failed)</span>';
+      }
+      removeTyping();
+    } finally {
+      textarea.value = "";
+    }
   });
+
+  // Leave room on navigate away
+  window.addEventListener("beforeunload", () => {
+    socket.emit("leave", { room: roomKey });
+  });
+})();
 </script>
 {% endblock %}

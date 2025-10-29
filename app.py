@@ -1,19 +1,24 @@
-from flask import Flask, render_template, request, redirect, url_for, session, abort
+from flask import Flask, render_template, request, redirect, url_for, session, abort, flash
+from flask_sqlalchemy import SQLAlchemy
+from flask_bcrypt import Bcrypt
+from flask_login import (
+    LoginManager, UserMixin, login_user, login_required,
+    logout_user, current_user
+)
 import random, string, time, os
 from dotenv import load_dotenv
 from openai import OpenAI
 from markupsafe import Markup
 import markdown2
 from threading import Thread
+from flask_socketio import SocketIO, join_room, leave_room
 
 # ----------------- Global Storage (ephemeral) -----------------
-# Visible to ALL users on this server instance
 GLOBAL_DEBATES = {}      # { CODE: {type, title, description, code} }
 GLOBAL_MESSAGES = {}     # { "debate:CODE" | "solo:SID": [ {user, role, text, ts}, ... ] }
 
 # ----------------- Env & OpenAI -----------------
-load_dotenv()  # local dev; on Render you set env vars in dashboard
-
+load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 client = None
 if OPENAI_API_KEY:
@@ -25,11 +30,32 @@ if OPENAI_API_KEY:
 else:
     print("WARNING: OPENAI_API_KEY not set. AI features will be disabled.")
 
-# ----------------- Flask -----------------
+# ----------------- Flask / DB / Login -----------------
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY") or "change_me_for_production"
 
-# Jinja filter for Markdown → HTML
+socketio = SocketIO(app, async_mode="eventlet", cors_allowed_origins="*")
+
+
+app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL", "sqlite:///judion.db")
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+
+db = SQLAlchemy(app)
+bcrypt = Bcrypt(app)
+login_manager = LoginManager(app)
+login_manager.login_view = "login"
+
+class User(db.Model, UserMixin):
+    id        = db.Column(db.Integer, primary_key=True)
+    email     = db.Column(db.String(120), unique=True, nullable=False)
+    password  = db.Column(db.String(200), nullable=False)
+    username  = db.Column(db.String(80), nullable=False)
+
+@login_manager.user_loader
+def load_user(user_id):
+    return User.query.get(int(user_id))
+
+# ----------------- Jinja filter -----------------
 @app.template_filter("markdown")
 def markdown_filter(text):
     return Markup(markdown2.markdown(text or ""))
@@ -40,27 +66,16 @@ def generate_code(length=6):
 
 @app.context_processor
 def inject_chats():
+    # We keep your existing sidebar list in session for now
     return {"chats": session.get("chats", [])}
 
-@app.before_request
-def require_login():
-    if request.endpoint in ("login", "static"):
-        return
-    if "username" not in session:
-        return redirect(url_for("login"))
-
-# ---------- Background workers (use GLOBAL_* only) ----------
+# ---------- Background workers (GLOBAL_* only) ----------
 def _bg_ai_reply_for_solo(sid: str):
-    """Generate AI reply for a solo chat using GLOBAL_MESSAGES; append result globally."""
     key = f"solo:{sid}"
     msgs = GLOBAL_MESSAGES.get(key, [])
-
-    # Build history
     history = [{"role": "system", "content": "You are Judion, a helpful AI assistant."}]
     for m in msgs:
         history.append({"role": m["role"], "content": m["text"]})
-
-    # Call model
     try:
         if not client:
             raise RuntimeError("No OpenAI client configured.")
@@ -72,23 +87,13 @@ def _bg_ai_reply_for_solo(sid: str):
         ai_text = resp.choices[0].message.content.strip()
     except Exception as e:
         ai_text = f"(Error: {e})"
-
-    # Append globally
-    msgs.append({
-        "user": "AI",
-        "role": "assistant",
-        "text": ai_text,
-        "ts": int(time.time())
-    })
+    msgs.append({"user": "AI", "role": "assistant", "text": ai_text, "ts": int(time.time())})
     GLOBAL_MESSAGES[key] = msgs
-
+    socketio.emit("new_message", msgs[-1], room=key)
 
 def _bg_judge_reply_for_debate(code: str):
-    """Generate neutral judge reply for a debate; append result globally."""
     key = f"debate:{code}"
     msgs = GLOBAL_MESSAGES.get(key, [])
-
-    # Build judge prompt & history
     history = [{
         "role": "system",
         "content": (
@@ -104,8 +109,6 @@ def _bg_judge_reply_for_debate(code: str):
     for m in msgs:
         role = "user" if m["role"] == "user" else "assistant"
         history.append({"role": role, "content": f"{m['user']}: {m['text']}"})
-
-    # Call model
     try:
         if not client:
             raise RuntimeError("No OpenAI client configured.")
@@ -117,69 +120,112 @@ def _bg_judge_reply_for_debate(code: str):
         ai_text = resp.choices[0].message.content.strip()
     except Exception as e:
         ai_text = f"(Error from Judge: {e})"
-
-    # Append globally
-    msgs.append({
-        "user": "Judge",
-        "role": "assistant",
-        "text": ai_text,
-        "ts": int(time.time())
-    })
+    msgs.append({"user": "Judge", "role": "assistant", "text": ai_text, "ts": int(time.time())})
     GLOBAL_MESSAGES[key] = msgs
+    socketio.emit("new_message", msgs[-1], room=key)
 
-# ---------- Routes ----------
-@app.route("/", methods=["GET", "POST"])
+# ===================== AUTH (Step 5) =====================
+
+@app.route("/", methods=["GET"])
+def root():
+    # Redirect root to login or main depending on auth state
+    if current_user.is_authenticated:
+        return redirect(url_for("main"))
+    return redirect(url_for("login"))
+
+@app.route("/login", methods=["GET", "POST"])
 def login():
+    # Real email+password login
     if request.method == "POST":
-        username = (request.form.get("username") or "").strip()
-        if username:
-            session["username"] = username
-            session.setdefault("chats", [])
-            return redirect(url_for("main"))
+        email = (request.form.get("email") or "").strip().lower()
+        password = request.form.get("password") or ""
+
+        user = User.query.filter_by(email=email).first()
+        if not user or not bcrypt.check_password_hash(user.password, password):
+            flash("Invalid email or password.", "danger")
+            return redirect(url_for("login"))
+
+        login_user(user, remember=True)
+        # Make sure the user has a personal sidebar list
+        session.setdefault("chats", [])
+        return redirect(url_for("main"))
+
     return render_template("login.html")
 
+@app.route("/signup", methods=["GET", "POST"])
+def signup():
+    if request.method == "POST":
+        email = (request.form.get("email") or "").strip().lower()
+        username = (request.form.get("username") or "").strip()
+        password = request.form.get("password") or ""
+
+        if not email or not username or not password:
+            flash("All fields are required.", "warning")
+            return redirect(url_for("signup"))
+
+        if User.query.filter_by(email=email).first():
+            flash("That email is already registered.", "warning")
+            return redirect(url_for("signup"))
+
+        hashed_pw = bcrypt.generate_password_hash(password).decode("utf-8")
+        user = User(email=email, username=username, password=hashed_pw)
+        db.session.add(user)
+        db.session.commit()
+
+        login_user(user, remember=True)
+        session.setdefault("chats", [])
+        return redirect(url_for("main"))
+
+    return render_template("signup.html")
+
+@app.route("/logout")
+@login_required
+def logout():
+    logout_user()
+    # Clear only the sidebar list; your app state is otherwise ephemeral
+    session.pop("chats", None)
+    return redirect(url_for("login"))
+
+# ===================== APP ROUTES (Step 7 + Step 8) =====================
+
 @app.route("/main")
+@login_required
 def main():
     return render_template("main.html")
 
-# ----- Create Debate (now also registers globally) -----
+# ----- Create Debate (registers globally) -----
 @app.route("/create/debate", methods=["POST"])
+@login_required
 def create_debate():
     title = (request.form.get("title") or "Untitled Debate").strip()
     description = (request.form.get("description") or "").strip()
     code = (request.form.get("code") or generate_code()).strip().upper()
 
-    chat = {
-        "type": "debate",
-        "title": title,
-        "description": description,
-        "code": code
-    }
+    chat = {"type": "debate", "title": title, "description": description, "code": code}
 
-    # Register globally (so *other users* can join by code)
     GLOBAL_DEBATES[code] = chat
     GLOBAL_MESSAGES.setdefault(f"debate:{code}", [])
 
-    # Also add to THIS user's sidebar (newest first)
     session.setdefault("chats", [])
-    # Prevent duplicates of the same code in this user's list
     session["chats"] = [c for c in session["chats"]
                         if not (c.get("type") == "debate" and c.get("code") == code)]
     session["chats"].insert(0, chat)
     session.modified = True
 
-    # Go straight to the room
+        # If AJAX request, don't redirect; keep the page in place
+    if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+        return ("", 204)
     return redirect(url_for("debate_room", code=code))
 
-# ----- Join Debate by code (cross-user) -----
+# ----- Join Debate by code -----
 @app.route("/join/debate", methods=["POST"])
+@login_required
 def join_debate():
     code = (request.form.get("code") or "").strip().upper()
     room = GLOBAL_DEBATES.get(code)
     if not room:
         return redirect(url_for("main"))
 
-    # Add to THIS user's sidebar if not present
     session.setdefault("chats", [])
     if not any(c.get("type") == "debate" and c.get("code") == code for c in session["chats"]):
         session["chats"].insert(0, room)
@@ -187,94 +233,97 @@ def join_debate():
 
     return redirect(url_for("debate_room", code=code))
 
+@socketio.on("join")
+def on_join(data):
+    """data = {'room': 'debate:CODE' or 'solo:SID'}"""
+    room = data.get("room")
+    if room:
+        join_room(room)
+
+@socketio.on("leave")
+def on_leave(data):
+    room = data.get("room")
+    if room:
+        leave_room(room)
+
+
 # ----- Debate Room -----
 @app.route("/room/<code>")
+@login_required
 def debate_room(code):
     room = GLOBAL_DEBATES.get(code)
     if not room:
         abort(404)
-
     key = f"debate:{code}"
     GLOBAL_MESSAGES.setdefault(key, [])
-
-    return render_template("debate_room.html",
-                           room=room,
-                           messages=GLOBAL_MESSAGES[key])
+    return render_template("debate_room.html", room=room, messages=GLOBAL_MESSAGES[key])
 
 @app.post("/room/<code>/message")
+@login_required
 def debate_message(code):
     if code not in GLOBAL_DEBATES:
         abort(404)
-
     text = (request.form.get("text") or "").strip()
     if text:
         key = f"debate:{code}"
         GLOBAL_MESSAGES.setdefault(key, [])
-
-        # 1) Append user's message immediately (so it renders on reload)
         new_msg = {
-            "user": session.get("username"),
+            "user": current_user.username,  # Step 8: username from login
             "role": "user",
             "text": text,
             "ts": int(time.time())
         }
         GLOBAL_MESSAGES[key].append(new_msg)
-
-        # 2) Fire background judge reply
-        Thread(target=_bg_judge_reply_for_debate, args=(code,), daemon=True).start()
-
-    # 3) Redirect right away — user sees their message instantly
+        socketio.emit("new_message", new_msg, room=key)
+        socketio.start_background_task(_bg_judge_reply_for_debate, code)
     return redirect(url_for("debate_room", code=code))
 
 # ----- Create / Solo Room -----
 @app.route("/create/solo", methods=["POST"])
+@login_required
 def create_solo():
     sid = generate_code()
     chat = {"type": "solo", "sid": sid, "title": "Solo Chat", "description": ""}
     session.setdefault("chats", [])
     session["chats"].insert(0, chat)
     session.modified = True
-
     GLOBAL_MESSAGES.setdefault(f"solo:{sid}", [])
     return redirect(url_for("solo_room", sid=sid))
 
 @app.route("/solo/<sid>")
+@login_required
 def solo_room(sid):
     chats = session.get("chats", [])
     room = next((c for c in chats if c.get("type") == "solo" and c.get("sid") == sid), None)
     if not room:
         abort(404)
-
     key = f"solo:{sid}"
     GLOBAL_MESSAGES.setdefault(key, [])
-
-    return render_template("solo_room.html",
-                           room=room,
-                           messages=GLOBAL_MESSAGES[key])
+    return render_template("solo_room.html", room=room, messages=GLOBAL_MESSAGES[key])
 
 @app.post("/solo/<sid>/message")
+@login_required
 def solo_message(sid):
     text = (request.form.get("text") or "").strip()
     if text:
         key = f"solo:{sid}"
         GLOBAL_MESSAGES.setdefault(key, [])
-
-        # 1) Append user's message globally (render instantly)
-        new_msg = {
-            "user": session.get("username"),
+        GLOBAL_MESSAGES[key].append({
+            "user": current_user.username,  # Step 8: username from login
             "role": "user",
             "text": text,
             "ts": int(time.time())
-        }
-        GLOBAL_MESSAGES[key].append(new_msg)
-
-        # 2) Background AI reply
-        Thread(target=_bg_ai_reply_for_solo, args=(sid,), daemon=True).start()
-
+        })
+        socketio.emit("new_message", GLOBAL_MESSAGES[key][-1], room=key)
+    socketio.start_background_task(_bg_ai_reply_for_solo, sid)
+        # If AJAX request, don't redirect; keep the page in place
+    if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+        return ("", 204)
     return redirect(url_for("solo_room", sid=sid))
 
 # ----- Delete chat -----
 @app.post("/delete/<chat_id>")
+@login_required
 def delete_chat(chat_id):
     chats = session.get("chats", [])
     found_idx, found_chat = None, None
@@ -282,12 +331,9 @@ def delete_chat(chat_id):
         if (c.get("type") == "debate" and c.get("code") == chat_id) or (c.get("type") == "solo" and c.get("sid") == chat_id):
             found_idx, found_chat = i, c
             break
-
     if found_idx is not None:
         chats.pop(found_idx)
         session["chats"] = chats
-
-        # Also clear global buffers for debates, and solo messages in this process
         if found_chat.get("type") == "debate":
             code = found_chat.get("code")
             GLOBAL_DEBATES.pop(code, None)
@@ -295,11 +341,9 @@ def delete_chat(chat_id):
         else:
             sid = found_chat.get("sid")
             GLOBAL_MESSAGES.pop(f"solo:{sid}", None)
-
         session.modified = True
-
     return redirect(url_for("main"))
 
 # ----- Local dev entry (Render uses gunicorn) -----
 if __name__ == "__main__":
-    app.run(debug=True)
+    socketio.run(app, debug=True)

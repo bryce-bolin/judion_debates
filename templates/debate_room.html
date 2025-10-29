@@ -26,17 +26,15 @@
 
   <div id="messages">
     {% for m in messages %}
-      {% set role = (m.role if m.role else 'assistant') %}
-      {% set is_user = (role == 'user' and m.user == session['username']) %}
+      {% set is_user = (m.role == 'user' and m.user == current_user.username) %}
       <div class="{{ 'row-user' if is_user else 'row-assist' }} mb-2">
         <div class="bubble {{ 'bubble-user' if is_user else 'bubble-assist' }}">
-          <div class="meta"><strong>{{ m.user if m.user else 'Judge' }}</strong></div>
-          <!-- Render messages with Markdown -->
+          <div class="meta"><strong>{{ m.user if m.user else 'AI' }}</strong></div>
           <div>{{ m.text | markdown | safe }}</div>
         </div>
       </div>
     {% else %}
-      <div class="muted">No messages yet. Be the first to post an argument.</div>
+      <div class="muted">No messages yet.</div>
     {% endfor %}
   </div>
 
@@ -53,20 +51,128 @@
     const messages = document.getElementById("messages");
     messages.scrollTop = messages.scrollHeight;
   })();
+</script>
 
-  // Show a temporary "Judge is typing…" bubble after submit
-  const form = document.querySelector(".composer");
-  form.addEventListener("submit", function() {
-    const messages = document.getElementById("messages");
+<script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
+<script>
+(() => {
+  const socket       = io();
+  const roomKey      = "debate:{{ room.code }}";
+  const messagesDiv  = document.getElementById("messages");
+  const composerForm = document.querySelector(".composer");
+  const textarea     = composerForm.querySelector("textarea");
+
+  socket.emit("join", { room: roomKey });
+
+  // --- helpers ---
+  function safeHTML(s) {
+    return (s || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/\n/g, "<br>");
+  }
+
+  function appendBubble(msg, isMine, opts = {}) {
+    const row = document.createElement("div");
+    row.className = (isMine ? "row-user" : "row-assist") + " mb-2";
+    const pendingAttr = opts.pending ? ' data-pending="1"' : '';
+    row.innerHTML = `
+      <div class="bubble ${isMine ? "bubble-user" : "bubble-assist"}"${pendingAttr}>
+        <div class="meta"><strong>${msg.user || "Judge"}</strong></div>
+        <div class="content">${safeHTML(msg.text)}</div>
+      </div>
+    `;
+    messagesDiv.appendChild(row);
+    messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    return row;
+  }
+
+  function removeTyping() {
+    document.querySelectorAll('[data-typing="1"]').forEach(el => {
+      const row = el.closest(".mb-2") || el;
+      row.remove();
+    });
+  }
+
+  function showTyping() {
+    removeTyping();
     const wrap = document.createElement("div");
     wrap.className = "row-assist mb-2";
     wrap.innerHTML = `
-      <div class="bubble bubble-assist">
+      <div class="bubble bubble-assist" data-typing="1">
         <div class="meta"><strong>Judge</strong></div>
         <div><em>Judge is typing…</em></div>
       </div>`;
-    messages.appendChild(wrap);
-    messages.scrollTop = messages.scrollHeight;
+    messagesDiv.appendChild(wrap);
+    messagesDiv.scrollTop = messagesDiv.scrollHeight;
+  }
+
+  // Try to resolve my pending (optimistic) bubble so we don't duplicate on echo
+  function resolvePendingFor(text) {
+    const pending = messagesDiv.querySelectorAll('.bubble[data-pending="1"] .content');
+    for (const el of pending) {
+      if (el.innerHTML === safeHTML(text)) {
+        el.closest('.bubble').removeAttribute('data-pending');
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // --- live messages from server ---
+  socket.on("new_message", (msg) => {
+    // If it's me and matches my pending bubble, don't duplicate
+    if (msg.user === "{{ current_user.username }}") {
+      if (resolvePendingFor(msg.text)) return;
+    }
+    // If it's the Judge (or anyone else), ensure typing indicator is gone
+    removeTyping();
+    appendBubble(msg, msg.user === "{{ current_user.username }}");
   });
+
+  // --- submit via fetch: optimistic + typing, no reload ---
+  composerForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+
+    const text = (textarea.value || "").trim();
+    if (!text) return;
+
+    // 1) Show my message immediately as 'pending'
+    appendBubble({ user: "{{ current_user.username }}", text }, true, { pending: true });
+
+    // 2) Show one typing bubble
+    showTyping();
+
+    // 3) POST without reload
+    try {
+      await fetch("{{ url_for('debate_message', code=room.code) }}", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "X-Requested-With": "XMLHttpRequest"
+        },
+        body: new URLSearchParams({ text })
+      });
+      textarea.value = "";
+      textarea.focus();
+      // Server will emit:
+      //  - my message echo → resolvePendingFor
+      //  - Judge message   → removeTyping + appendBubble
+    } catch (err) {
+      removeTyping();
+      appendBubble({ user: "System", text: "(Send failed. Please try again.)" }, false);
+      console.error(err);
+    }
+  });
+
+  // Leave room when navigating away
+  window.addEventListener("beforeunload", () => {
+    socket.emit("leave", { room: roomKey });
+  });
+
+  // initial bottom
+  messagesDiv.scrollTop = messagesDiv.scrollHeight;
+})();
 </script>
 {% endblock %}

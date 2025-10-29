@@ -1,12 +1,44 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="d-flex justify-content-center align-items-center h-100">
-  <form method="post" class="w-100" style="max-width:480px;">
-    <h2 class="mb-3">Welcome to Judion</h2>
-    <p class="muted mb-4">Settle arguments and challenges quickly and fairly.</p>
-    <label class="form-label">Username</label>
-    <input type="text" name="username" class="form-control mb-3" placeholder="Choose a display name" required>
-    <button type="submit" class="btn btn-primary w-100">Continue</button>
+<div class="container" style="max-width:520px;">
+  <h2 class="mb-3">Welcome back</h2>
+
+  {% with msgs = get_flashed_messages(with_categories=true) %}
+    {% if msgs %}
+      <div class="mb-3">
+        {% for cat, msg in msgs %}
+          <div class="alert alert-{{ 'warning' if cat=='warning' else 'danger' }}">{{ msg }}</div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  {% endwith %}
+
+  <form method="post" action="{{ url_for('login') }}" class="mt-3">
+    <label class="form-label">Email</label>
+    <input name="email" type="email" class="form-control mb-3" required>
+
+    <label class="form-label">Password</label>
+    <div class="mb-4">
+      <input name="password" type="password" class="form-control mb-2" id="passwordField" required>
+      <div class="form-check">
+        <input class="form-check-input" type="checkbox" id="showPassword" onclick="togglePassword()">
+        <label class="form-check-label" for="showPassword">Show password</label>
+      </div>
+    </div>
+
+    <button class="btn btn-primary w-100">Log in</button>
   </form>
+
+  <p class="mt-3">
+    <span class="muted">Don’t have an account?</span>
+    <a class="text-white text-decoration-underline" href="{{ url_for('signup') }}">Create one</a>
+  </p>
 </div>
+<script>
+function togglePassword() {
+  const pw = document.getElementById("passwordField");
+  pw.type = (pw.type === "password") ? "text" : "password";
+}
+</script>
+
 {% endblock %}

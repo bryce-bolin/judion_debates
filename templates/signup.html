@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container" style="max-width:420px; margin:40px auto;">
+  <h2 class="mb-3">Create account</h2>
+
+  {% with msgs = get_flashed_messages(with_categories=True) %}
+    {% if msgs %}
+      {% for cat, msg in msgs %}
+        <div class="alert alert-{{ 'danger' if cat=='danger' else cat }}" role="alert">{{ msg }}</div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+
+  <form method="post" action="{{ url_for('signup') }}">
+    <label class="form-label">Email</label>
+    <input name="email" type="email" class="form-control mb-3" placeholder="you@example.com" required>
+
+    <label class="form-label">Username</label>
+    <input name="username" type="text" class="form-control mb-3" placeholder="Your display name" required>
+
+    <label class="form-label">Password</label>
+    <div class="mb-4">
+        <input name="password" type="password" class="form-control mb-2" id="passwordField" required>
+        <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="showPassword" onclick="togglePassword()">
+            <label class="form-check-label" for="showPassword">Show password</label>
+        </div>
+    </div>
+
+    <button class="btn btn-primary w-100">Create account</button>
+  </form>
+  <p class="mt-3">
+    <span class="muted">Already have an account?</span>
+    <a class="text-white text-decoration-underline" href="{{ url_for('login') }}">Sign in</a>
+  </p>  
+</div>
+<script>
+function togglePassword() {
+  const pw = document.getElementById("passwordField");
+  pw.type = (pw.type === "password") ? "text" : "password";
+}
+</script>
+{% endblock %}

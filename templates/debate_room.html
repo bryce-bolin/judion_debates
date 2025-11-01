@@ -56,95 +56,87 @@
 <script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
 <script>
 (() => {
-  const socket       = io();
-  const roomKey      = "debate:{{ room.code }}";
+  const socket = io();
+
+  // Join this debate room
+  const roomKey = "debate:{{ room.code }}";
+  socket.emit("join", { room: roomKey });
+
   const messagesDiv  = document.getElementById("messages");
   const composerForm = document.querySelector(".composer");
   const textarea     = composerForm.querySelector("textarea");
 
-  socket.emit("join", { room: roomKey });
-
-  // --- helpers ---
-  function safeHTML(s) {
-    return (s || "")
+  // escape helper to avoid injecting raw HTML
+  function escapeHTML(str) {
+    return (str || "")
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;")
       .replace(/\n/g, "<br>");
   }
 
-  function appendBubble(msg, isMine, opts = {}) {
+  // typing bubble tracking
+  let typingEl = null;
+  function showTyping() {
+    if (typingEl) return;
+    typingEl = document.createElement("div");
+    typingEl.className = "row-assist mb-2";
+    typingEl.innerHTML = `
+      <div class="bubble bubble-assist" data-typing="1">
+        <div class="meta"><strong>Judge</strong></div>
+        <div><em>Judge is typing...</em></div>
+      </div>`;
+    messagesDiv.appendChild(typingEl);
+    messagesDiv.scrollTop = messagesDiv.scrollHeight;
+  }
+
+  function hideTyping() {
+    if (typingEl && typingEl.parentNode) {
+        typingEl.parentNode.removeChild(typingEl);
+    }
+    typingEl = null;
+  }
+
+  // helper to append a message bubble
+  function appendBubble(msg, isMine) {
     const row = document.createElement("div");
     row.className = (isMine ? "row-user" : "row-assist") + " mb-2";
-    const pendingAttr = opts.pending ? ' data-pending="1"' : '';
     row.innerHTML = `
-      <div class="bubble ${isMine ? "bubble-user" : "bubble-assist"}"${pendingAttr}>
+      <div class="bubble ${isMine ? "bubble-user" : "bubble-assist"}">
         <div class="meta"><strong>${msg.user || "Judge"}</strong></div>
-        <div class="content">${safeHTML(msg.text)}</div>
+        <div>${escapeHTML(msg.text)}</div>
       </div>
     `;
     messagesDiv.appendChild(row);
     messagesDiv.scrollTop = messagesDiv.scrollHeight;
-    return row;
   }
 
-  function removeTyping() {
-    document.querySelectorAll('[data-typing="1"]').forEach(el => {
-      const row = el.closest(".mb-2") || el;
-      row.remove();
-    });
-  }
-
-  function showTyping() {
-    removeTyping();
-    const wrap = document.createElement("div");
-    wrap.className = "row-assist mb-2";
-    wrap.innerHTML = `
-      <div class="bubble bubble-assist" data-typing="1">
-        <div class="meta"><strong>Judge</strong></div>
-        <div><em>Judge is typing…</em></div>
-      </div>`;
-    messagesDiv.appendChild(wrap);
-    messagesDiv.scrollTop = messagesDiv.scrollHeight;
-  }
-
-  // Try to resolve my pending (optimistic) bubble so we don't duplicate on echo
-  function resolvePendingFor(text) {
-    const pending = messagesDiv.querySelectorAll('.bubble[data-pending="1"] .content');
-    for (const el of pending) {
-      if (el.innerHTML === safeHTML(text)) {
-        el.closest('.bubble').removeAttribute('data-pending');
-        return true;
-      }
-    }
-    return false;
-  }
-
-  // --- live messages from server ---
+  // listen for real-time messages from the server
   socket.on("new_message", (msg) => {
-    // If it's me and matches my pending bubble, don't duplicate
-    if (msg.user === "{{ current_user.username }}") {
-      if (resolvePendingFor(msg.text)) return;
+    // if the judge just replied, kill the typing bubble
+    if (msg.user === "Judge") {
+      hideTyping();
     }
-    // If it's the Judge (or anyone else), ensure typing indicator is gone
-    removeTyping();
     appendBubble(msg, msg.user === "{{ current_user.username }}");
   });
 
-  // --- submit via fetch: optimistic + typing, no reload ---
+  // intercept the Send submit
   composerForm.addEventListener("submit", async (e) => {
     e.preventDefault();
 
     const text = (textarea.value || "").trim();
     if (!text) return;
 
-    // 1) Show my message immediately as 'pending'
-    appendBubble({ user: "{{ current_user.username }}", text }, true, { pending: true });
+    // 1. append my bubble on the right immediately
+    appendBubble({ user: "{{ current_user.username }}", text }, true);
 
-    // 2) Show one typing bubble
+    // 2. show "Judge is typing..."
     showTyping();
 
-    // 3) POST without reload
+    // 3. clear the box
+    textarea.value = "";
+
+    // 4. send to server via AJAX instead of full page reload
     try {
       await fetch("{{ url_for('debate_message', code=room.code) }}", {
         method: "POST",
@@ -154,25 +146,24 @@
         },
         body: new URLSearchParams({ text })
       });
-      textarea.value = "";
-      textarea.focus();
-      // Server will emit:
-      //  - my message echo → resolvePendingFor
-      //  - Judge message   → removeTyping + appendBubble
+      // Judge reply will come in later through socket.on("new_message")
     } catch (err) {
-      removeTyping();
-      appendBubble({ user: "System", text: "(Send failed. Please try again.)" }, false);
+      hideTyping();
+      appendBubble(
+        { user: "System", text: "(Send failed. Please try again.)" },
+        false
+      );
       console.error(err);
     }
   });
 
-  // Leave room when navigating away
+  // scroll to bottom on load
+  messagesDiv.scrollTop = messagesDiv.scrollHeight;
+
+  // leave room on unload
   window.addEventListener("beforeunload", () => {
     socket.emit("leave", { room: roomKey });
   });
-
-  // initial bottom
-  messagesDiv.scrollTop = messagesDiv.scrollHeight;
 })();
 </script>
 {% endblock %}

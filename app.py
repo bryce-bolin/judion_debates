@@ -1,3 +1,6 @@
+import eventlet
+eventlet.monkey_patch()
+
 from flask import Flask, render_template, request, redirect, url_for, session, abort, flash
 from flask_sqlalchemy import SQLAlchemy
 from flask_bcrypt import Bcrypt
@@ -10,7 +13,6 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from markupsafe import Markup
 import markdown2
-from threading import Thread
 from flask_socketio import SocketIO, join_room, leave_room
 
 import sys
@@ -271,19 +273,31 @@ def debate_room(code):
 def debate_message(code):
     if code not in GLOBAL_DEBATES:
         abort(404)
+
     text = (request.form.get("text") or "").strip()
+    key = f"debate:{code}"
+
     if text:
-        key = f"debate:{code}"
         GLOBAL_MESSAGES.setdefault(key, [])
         new_msg = {
-            "user": current_user.username,  # Step 8: username from login
+            "user": current_user.username,
             "role": "user",
             "text": text,
             "ts": int(time.time())
         }
         GLOBAL_MESSAGES[key].append(new_msg)
+
+        # broadcast my message to everyone in the debate
         socketio.emit("new_message", new_msg, room=key)
-        socketio.start_background_task(_bg_judge_reply_for_debate, code)
+
+        # spawn the Judge brain in an eventlet green thread
+        eventlet.spawn_n(_bg_judge_reply_for_debate, code)
+
+    # If this came from AJAX (we'll send X-Requested-With), just say "OK, no redirect"
+    if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+        return ("", 204)
+
+    # fallback for non-JS form posts
     return redirect(url_for("debate_room", code=code))
 
 # ----- Create / Solo Room -----
@@ -313,20 +327,26 @@ def solo_room(sid):
 @login_required
 def solo_message(sid):
     text = (request.form.get("text") or "").strip()
+    key = f"solo:{sid}"
+
     if text:
-        key = f"solo:{sid}"
         GLOBAL_MESSAGES.setdefault(key, [])
         GLOBAL_MESSAGES[key].append({
-            "user": current_user.username,  # Step 8: username from login
+            "user": current_user.username,
             "role": "user",
             "text": text,
             "ts": int(time.time())
         })
         socketio.emit("new_message", GLOBAL_MESSAGES[key][-1], room=key)
-    socketio.start_background_task(_bg_ai_reply_for_solo, sid)
-        # If AJAX request, don't redirect; keep the page in place
+
+        # spawn the AI reply using eventlet instead of Thread
+        eventlet.spawn_n(_bg_ai_reply_for_solo, sid)
+
+    # If this was an AJAX call, we return 204 instead of redirecting
     if request.headers.get("X-Requested-With") == "XMLHttpRequest":
         return ("", 204)
+
+    # Fallback for normal form POST
     return redirect(url_for("solo_room", sid=sid))
 
 # ----- Delete chat -----

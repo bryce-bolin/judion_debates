@@ -36,7 +36,6 @@ app.secret_key = os.getenv("SECRET_KEY") or "change_me_for_production"
 
 socketio = SocketIO(app, async_mode="eventlet", cors_allowed_origins="*")
 
-
 app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL", "sqlite:///judion.db")
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
@@ -346,4 +345,9 @@ def delete_chat(chat_id):
 
 # ----- Local dev entry (Render uses gunicorn) -----
 if __name__ == "__main__":
-    socketio.run(app, debug=True)
+    socketio.run(
+        app,
+        debug=True,
+        host="0.0.0.0",
+        port=int(os.environ.get("PORT", 5000)),
+    )

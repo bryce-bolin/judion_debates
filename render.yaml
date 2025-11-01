@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: judion
+    env: python
+    plan: free
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "gunicorn --worker-class eventlet -w 1 app:app"
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9

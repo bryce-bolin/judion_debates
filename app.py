@@ -13,6 +13,15 @@ import markdown2
 from threading import Thread
 from flask_socketio import SocketIO, join_room, leave_room
 
+import sys
+
+# Hard kill if not Python 3.11.*
+if not (sys.version_info.major == 3 and sys.version_info.minor == 11):
+    raise RuntimeError(
+        f"Python {sys.version.split()[0]} is not supported. "
+        "This app requires Python 3.11 for eventlet / Flask-SocketIO."
+    )
+
 # ----------------- Global Storage (ephemeral) -----------------
 GLOBAL_DEBATES = {}      # { CODE: {type, title, description, code} }
 GLOBAL_MESSAGES = {}     # { "debate:CODE" | "solo:SID": [ {user, role, text, ts}, ... ] }

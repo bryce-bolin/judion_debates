@@ -1,154 +1,233 @@
 {% extends "base.html" %}
 {% block content %}
 <style>
-  .chat-wrap { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; height: 100%; }
+  .chat-wrap {
+    max-width: 760px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+  }
   #messages { flex: 1; overflow-y: auto; padding-bottom: 96px; }
 
-  .row-user   { display:flex; justify-content:flex-end; }
-  .row-assist { display:flex; justify-content:flex-start; }
+  /* Keep rows tidy and NEVER stretch bubbles vertically */
+  .row-user,
+  .row-assist {
+    display: flex;
+    justify-content: flex-start;
+    align-items: flex-start !important;   /* <-- was flex-end; causes tall rows */
+    gap: .25rem;
+  }
+  .row-user   { justify-content: flex-end; }
+  .row-assist { justify-content: flex-start; }
 
-  .bubble { padding:.75rem 1rem; border-radius: 12px; border:1px solid #333; max-width: 90%; }
+  /* Real chat bubbles that size to content */
+  .bubble {
+    display: inline-flex;                 /* inline-block is fine, inline-flex gives us better control */
+    flex-direction: column;
+    flex: 0 0 auto;                       /* never grow or shrink */
+    width: auto;                          /* size to content */
+    max-width: 70%;
+    padding: .55rem .85rem;
+    margin: .35rem 0;
+    border-radius: 18px;
+    border: 1px solid #333;
+    background: #121212;
+    line-height: 1.32;
+    word-break: break-word;
+    white-space: pre-wrap;
+    height: auto !important;              /* kill any accidental inherited height */
+    min-height: 0 !important;
+  }
+
+  /* Theme variants */
   .bubble-user   { background:#1b1b1b; border-color:#2d2d2d; }
   .bubble-assist { background:#121212; border-color:#2a2a2a; }
 
+  /* Trim markdown spacing so paragraphs don’t add invisible height */
+  .bubble > * { margin: 0; }
+  .bubble p + p { margin-top: .35rem; }
+  .bubble h1, .bubble h2, .bubble h3,
+  .bubble h4, .bubble h5, .bubble h6 { margin: .25rem 0; line-height: 1.2; }
+  .bubble ul, .bubble ol { margin: .3rem 0 .3rem 1.1rem; padding-left: 1.1rem; }
+  .bubble blockquote { margin: .3rem 0; }
+  .bubble pre, .bubble code { margin: 0; }
+  .bubble * { max-width: 100%; }          /* safety for images/long code lines */
+
   .meta { color:#aaa; font-size:.8rem; margin-bottom:.25rem; }
-  .composer { position: sticky; bottom: 0; background:#000; padding:.5rem 0; z-index:10; border-top:1px solid #222; }
+  .composer {
+    position: sticky; bottom: 0;
+    background:#000; padding:.5rem 0;
+    z-index:10; border-top:1px solid #222;
+  }
 </style>
 
 <div class="chat-wrap">
-  <div class="mb-3">
-    <h3 class="mb-1">{{ room.title }}</h3>
-    {% if room.description %}<p class="muted mb-2">{{ room.description }}</p>{% endif %}
-  </div>
+ <div class="mb-3">
+   <h3 class="mb-1">{{ room.title }}</h3>
+   {% if room.description %}<p class="muted mb-2">{{ room.description }}</p>{% endif %}
+ </div>
 
-  <div id="messages">
-    {% for m in messages %}
-      {% set is_user = (m.role == 'user' and m.user == current_user.username) %}
-      <div class="{{ 'row-user' if is_user else 'row-assist' }} mb-2">
-        <div class="bubble {{ 'bubble-user' if is_user else 'bubble-assist' }}">
-          <div class="meta"><strong>{{ m.user if m.user else 'AI' }}</strong></div>
-          <div>{{ m.text | markdown | safe }}</div>
-        </div>
-      </div>
-    {% else %}
-      <div class="muted">No messages yet. Start typing below.</div>
-    {% endfor %}
-  </div>
 
-  <form class="composer" action="{{ url_for('solo_message', sid=room.sid) }}" method="post">
-    <label class="form-label">Message</label>
-    <textarea name="text" rows="3" class="form-control mb-2" placeholder="Send a message…" autofocus></textarea>
-    <button class="btn btn-primary">Send</button>
-  </form>
-</div> 
+ <div id="messages">
+   {% for m in messages %}
+     {% set is_user = (m.role == 'user' and m.user == current_user.username) %}
+     <div class="{{ 'row-user' if is_user else 'row-assist' }} mb-2">
+       <div class="bubble {{ 'bubble-user' if is_user else 'bubble-assist' }}">
+         <div class="meta"><strong>{{ m.user if m.user else 'AI' }}</strong></div>
+         <div>{{ m.text | markdown | safe }}</div>
+       </div>
+     </div>
+   {% else %}
+     <div class="muted">No messages yet. Start typing below.</div>
+   {% endfor %}
+ </div>
+
+
+ <form class="composer" action="{{ url_for('solo_message', sid=room.sid) }}" method="post">
+   <label class="form-label">Message</label>
+   <textarea name="text" rows="3" class="form-control mb-2" placeholder="Send a message…" autofocus></textarea>
+   <button class="btn btn-primary">Send</button>
+ </form>
+</div>
+
 
 <script>
-  // Auto-scroll to bottom on load
-  (function () {
-    const messages = document.getElementById("messages");
-    messages.scrollTop = messages.scrollHeight;
-  })();
+ // Auto-scroll to bottom on load
+ (function () {
+   const messages = document.getElementById("messages");
+   messages.scrollTop = messages.scrollHeight;
+ })();
 </script>
+
 
 <script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
 <script>
 (() => {
-  const socket = io();
-  const roomKey = "solo:{{ room.sid }}";
-  socket.emit("join", { room: roomKey });
+ const socket = io();
+ const roomKey = "solo:{{ room.sid }}";
+ socket.emit("join", { room: roomKey });
 
-  const messagesDiv = document.getElementById("messages");
-  const composerForm = document.querySelector(".composer");
-  const textarea = composerForm.querySelector("textarea");
 
-  // helper to safely insert text (no HTML injection)
-  function escapeHTML(str) {
-    return (str || "")
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/\n/g, "<br>");
-  }
+ const messagesDiv = document.getElementById("messages");
+ const composerForm = document.querySelector(".composer");
+ const textarea = composerForm.querySelector("textarea");
 
-  function appendBubble(msg, isMine) {
-    const row = document.createElement("div");
-    row.className = (isMine ? "row-user" : "row-assist") + " mb-2";
-    row.innerHTML = `
-      <div class="bubble ${isMine ? "bubble-user" : "bubble-assist"}">
-        <div class="meta"><strong>${msg.user || "AI"}</strong></div>
-        <div>${escapeHTML(msg.text)}</div>
-      </div>
-    `;
-    messagesDiv.appendChild(row);
-    messagesDiv.scrollTop = messagesDiv.scrollHeight;
-  }
 
-  // remove "AI is typing..." bubbles
-  function removeTyping() {
-    document.querySelectorAll('[data-typing="1"]').forEach(el => {
-      const row = el.closest(".mb-2") || el;
-      row.remove();
-    });
-  }
+ function escapeHTML(str) {
+   return (str || "")
+     .replace(/&/g, "&amp;")
+     .replace(/</g, "&lt;")
+     .replace(/>/g, "&gt;")
+     .replace(/\n/g, "<br>");
+ }
 
-  // listen for real messages from server
-  socket.on("new_message", (msg) => {
-    removeTyping();
-    appendBubble(msg, msg.user === "{{ current_user.username }}");
-  });
 
-  // intercept Send
-  composerForm.addEventListener("submit", async (e) => {
-    e.preventDefault();
+ function appendBubble(msg, isMine) {
+   const row = document.createElement("div");
+   row.className = (isMine ? "row-user" : "row-assist") + " mb-2";
+   row.innerHTML = `
+     <div class="bubble ${isMine ? "bubble-user" : "bubble-assist"}">
+       <div class="meta"><strong>${msg.user || "AI"}</strong></div>
+       <div>${escapeHTML(msg.text)}</div>
+     </div>
+   `;
+   messagesDiv.appendChild(row);
+   messagesDiv.scrollTop = messagesDiv.scrollHeight;
+ }
 
-    const text = (textarea.value || "").trim();
-    if (!text) return;
 
-    // show my bubble immediately
-    appendBubble({ user: "{{ current_user.username }}", text }, true);
+ function removeTyping() {
+   document.querySelectorAll('[data-typing="1"]').forEach(el => {
+     const row = el.closest(".mb-2") || el;
+     row.remove();
+   });
+ }
 
-    // show "AI is typing..." bubble
-    removeTyping();
-    const typingWrap = document.createElement("div");
-    typingWrap.className = "row-assist mb-2";
-    typingWrap.innerHTML = `
-      <div class="bubble bubble-assist" data-typing="1">
-        <div class="meta"><strong>AI</strong></div>
-        <div><em>AI is typing...</em></div>
-      </div>`;
-    messagesDiv.appendChild(typingWrap);
-    messagesDiv.scrollTop = messagesDiv.scrollHeight;
 
-    // clear the box right away so it doesn't stick
-    textarea.value = "";
+ function showTypingAtEnd() {
+   removeTyping();
+   const wrap = document.createElement("div");
+   wrap.className = "row-assist mb-2";
+   wrap.innerHTML = `
+     <div class="bubble bubble-assist" data-typing="1">
+       <div class="meta"><strong>AI</strong></div>
+       <div><em>AI is typing...</em></div>
+     </div>`;
+   messagesDiv.appendChild(wrap);
+   messagesDiv.scrollTop = messagesDiv.scrollHeight;
+ }
 
-    // send to server with AJAX (this matches the X-Requested-With check in app.py)
-    try {
-      await fetch("{{ url_for('solo_message', sid=room.sid) }}", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          "X-Requested-With": "XMLHttpRequest"
-        },
-        body: new URLSearchParams({ text })
-      });
-    } catch (err) {
-      console.error("send failed", err);
-      removeTyping();
-      appendBubble(
-        { user: "System", text: "(Send failed. Please try again.)" },
-        false
-      );
-    }
-  });
 
-  // leave room on navigate away
-  window.addEventListener("beforeunload", () => {
-    socket.emit("leave", { room: roomKey });
-  });
+ // We don't optimistically append the user message.
+ // Instead, when our echoed user message arrives, we append it THEN place the typing bubble after it.
+ let waitingForOwnEcho = false;
 
-  // scroll to bottom on load
-  messagesDiv.scrollTop = messagesDiv.scrollHeight;
+
+ socket.on("new_message", (msg) => {
+   const isMine = msg.user === "{{ current_user.username }}";
+   const isAI   = (msg.user || "").toLowerCase() === "ai";
+
+
+   if (isAI) {
+     // AI replied → remove typing before inserting AI bubble
+     removeTyping();
+     appendBubble(msg, false);
+     return;
+   }
+
+
+   // It's a human message (possibly ours). Append it first.
+   appendBubble(msg, isMine);
+
+
+   // If it's our own echo (usual case right after submit), make sure typing bubble is at the end.
+   if (isMine || waitingForOwnEcho) {
+     showTypingAtEnd();
+     waitingForOwnEcho = false;
+   }
+ });
+
+
+ composerForm.addEventListener("submit", async (e) => {
+   e.preventDefault();
+
+
+   const text = (textarea.value || "").trim();
+   if (!text) return;
+
+
+   // Clear the box immediately so the text doesn't stick
+   textarea.value = "";
+
+
+   // Mark that we're waiting for our echoed message; typing bubble will be placed after it.
+   waitingForOwnEcho = true;
+
+
+   try {
+     await fetch("{{ url_for('solo_message', sid=room.sid) }}", {
+       method: "POST",
+       headers: {
+         "Content-Type": "application/x-www-form-urlencoded",
+         "X-Requested-With": "XMLHttpRequest"
+       },
+       body: new URLSearchParams({ text })
+     });
+     // Our own message and the AI reply will arrive via socket events.
+   } catch (err) {
+     waitingForOwnEcho = false;
+     removeTyping();
+     appendBubble({ user: "System", text: "(Send failed. Please try again.)" }, false);
+     console.error(err);
+   }
+ });
+
+ window.addEventListener("beforeunload", () => {
+   socket.emit("leave", { room: roomKey });
+ });
+
+ messagesDiv.scrollTop = messagesDiv.scrollHeight;
 })();
 </script>
 {% endblock %}

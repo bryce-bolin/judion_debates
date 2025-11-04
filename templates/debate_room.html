@@ -1,20 +1,64 @@
 {% extends "base.html" %}
 {% block content %}
 <style>
-  .chat-wrap { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; height: 100%; }
+  .chat-wrap {
+    max-width: 760px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+  }
   #messages { flex: 1; overflow-y: auto; padding-bottom: 96px; }
 
-  /* Alignment: me on right, judge/others on left */
-  .row-user   { display:flex; justify-content:flex-end; }
-  .row-assist { display:flex; justify-content:flex-start; }
+  /* Keep rows tidy and NEVER stretch bubbles vertically */
+  .row-user,
+  .row-assist {
+    display: flex;
+    justify-content: flex-start;
+    align-items: flex-start !important;   /* key fix */
+    gap: .25rem;
+  }
+  .row-user   { justify-content: flex-end; }
+  .row-assist { justify-content: flex-start; }
 
-  /* Neutral dark bubbles */
-  .bubble { padding:.75rem 1rem; border-radius: 12px; border:1px solid #333; max-width: 90%; }
+  /* Real chat bubbles that size to content (compact) */
+  .bubble {
+    display: inline-flex;
+    flex-direction: column;
+    flex: 0 0 auto;                       /* don’t grow/shrink */
+    width: auto;                           /* size to content */
+    max-width: 70%;
+    padding: .55rem .85rem;
+    margin: .35rem 0;
+    border-radius: 18px;
+    border: 1px solid #333;
+    line-height: 1.32;
+    word-break: break-word;
+    white-space: pre-wrap;
+    height: auto !important;
+    min-height: 0 !important;
+  }
+
+  /* Theme variants */
   .bubble-user   { background:#1b1b1b; border-color:#2d2d2d; }
   .bubble-assist { background:#121212; border-color:#2a2a2a; }
 
+  /* Trim markdown spacing so paragraphs don’t add invisible height */
+  .bubble > * { margin: 0; }
+  .bubble p + p { margin-top: .35rem; }
+  .bubble h1, .bubble h2, .bubble h3,
+  .bubble h4, .bubble h5, .bubble h6 { margin: .25rem 0; line-height: 1.2; }
+  .bubble ul, .bubble ol { margin: .3rem 0 .3rem 1.1rem; padding-left: 1.1rem; }
+  .bubble blockquote { margin: .3rem 0; }
+  .bubble pre, .bubble code { margin: 0; }
+  .bubble * { max-width: 100%; }
+
   .meta { color:#aaa; font-size:.8rem; margin-bottom:.25rem; }
-  .composer { position: sticky; bottom: 0; background:#000; padding:.5rem 0; z-index:10; border-top:1px solid #222; }
+  .composer {
+    position: sticky; bottom: 0;
+    background:#000; padding:.5rem 0;
+    z-index:10; border-top:1px solid #222;
+  }
 </style>
 
 <div class="chat-wrap">

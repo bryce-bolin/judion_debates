@@ -1,32 +1,10 @@
 {% extends "base.html" %}
 {% block content %}
-<div style="max-width:720px;">
-  <h2 class="mb-3">Create a new chat</h2>
-  <p class="muted mb-4">Use the buttons on the left to start a Debate or Solo chat. Your chats appear in the sidebar.</p>
-
-  <!-- Shown when the + Debate button is clicked in the sidebar -->
-  <form id="debateForm" action="{{ url_for('create_debate') }}" method="post" class="mb-4" style="display:none;">
-    <div class="mb-3">
-      <label class="form-label">Title *</label>
-      <input name="title" class="form-control" placeholder="e.g., Is AI good for education?" required>
-    </div>
-    <div class="mb-3">
-      <label class="form-label">Description (optional)</label>
-      <textarea name="description" class="form-control" rows="3" placeholder="Context or rules…"></textarea>
-    </div>
-    <div class="mb-3">
-      <label class="form-label">Custom Code (optional)</label>
-      <input name="code" class="form-control" placeholder="Leave blank to auto-generate">
-    </div>
-    <button class="btn btn-primary">Create Debate</button>
-  </form>
-  
-  <h5>Join a Debate</h5>
-  <form action="{{ url_for('join_debate') }}" method="post" class="mb-3">
-    <input type="text" name="code" class="form-control mb-2" placeholder="Enter debate code..." required>
-    <button class="btn btn-secondary w-100">Join</button>
-  </form>
-
-  <div class="muted">Tip: Debates have a shareable code. Solo chats are private.</div>
+<div class="container" style="max-width:760px;">
+  <h3 class="mb-3">Welcome to Judion</h3>
+  <p class="text-secondary">
+    Use the controls in the <strong>left sidebar</strong> to create a Debate Chat or a Solo Chat.
+    Your chats will appear in the list below those buttons.
+  </p>
 </div>
 {% endblock %}

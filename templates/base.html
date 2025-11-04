@@ -7,179 +7,240 @@
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
   <style>
-    body { font-family: 'Inter', sans-serif; }
-    :root { --bg:#000; --text:#fff; --muted:#aaa; }
-    html, body { height:100%; background:var(--bg); color:var(--text); }
-    a, .btn-link { color:var(--text); }
-    #sidebar { height:100vh; overflow-y:auto; background:#111; border-right:1px solid #444; }
-    #main { height:100vh; overflow-y:auto; padding:1rem 1.25rem; background:#000; }
-    .brand { font-weight:800; font-size:1.2rem; color:var(--text); }
+    :root { --bg:#000; --text:#fff; --muted:#aaa; --panel:#111; --line:#333; }
+    * { box-sizing: border-box; }
+   html, body { height:100%; background:var(--bg); color:var(--text); font-family:'Inter',system-ui,sans-serif; }
 
-    .icon {
-      width:20px; height:20px;
-      display:inline-block;
-      margin-right:8px;
-      vertical-align:-3px;
-      color:#fff;
-    }
-    .icon path, .icon circle, .icon line {
-      stroke:currentColor;
-      fill:none;
-      stroke-width:2;
-      stroke-linecap:round;
-      stroke-linejoin:round;
-      vector-effect:non-scaling-stroke;
-    }
+    /* Top navbar */
+    .navbar { border-bottom:1px solid #272727; }
 
-    /* Both buttons white */
-    .btn-primary, .btn-secondary {
-      background:#fff; color:#000; border:none;
+    /* ===== Permanent sidebar layout ===== */
+    .app-shell {
+      height: calc(100vh - 56px); /* 56px ≈ default .navbar height */
+      display: flex;
+      min-height: 0; /* allow children to scroll */
     }
-    .btn-primary:hover, .btn-secondary:hover {
-      background:#eaeaea; color:#000;
+    #sidebar {
+      width: 280px;               /* fixed width so it never collapses */
+      background: var(--panel);
+      border-right: 1px solid #272727;
+      padding: 14px;
+      overflow-y: auto;
+    }
+    #main {
+      flex: 1;
+      min-width: 0;
+      padding: 18px;
+      overflow-y: auto;
+      background: #000;
     }
 
-    .chat-item { background:#1a1a1a; border:1px solid #333; color:var(--text); position:relative; }
-    .chat-item small { color:var(--muted); }
+    /* Buttons */
+    .btn-primary, .btn-secondary { background:#fff; color:#000; border:none; }
+    .btn-primary:hover, .btn-secondary:hover { background:#eaeaea; color:#000; }
+    .btn { padding:.55rem 1rem; border-radius:14px !important; }
+
     .divider { border-color:#444; }
     .muted { color:var(--muted); }
-    input, textarea { background:#111 !important; color:var(--text) !important; border:1px solid #444 !important; }
 
-    /* Delete button */
+    input, textarea {
+      background:#111 !important;
+      color:var(--text) !important;
+      border:1px solid #444 !important;
+      border-radius:14px !important;
+    }
+
+    .chat-item {
+      background:#141414;
+      border:1px solid #2b2b2b;
+      color:var(--text);
+      position:relative;
+      border-radius:14px;
+    }
+    .chat-item small { color:var(--muted); }
+
+    /* delete X */
     .delete-form { position:absolute; top:4px; right:6px; }
     .delete-form button {
-      background:none; border:none; color:#888; font-size:14px; line-height:1; padding:0; cursor:pointer;
+      background:none; border:none; color:#888; font-size:14px; padding:0; cursor:pointer;
     }
     .delete-form button:hover { color:#f55; }
+
+    /* Tiny icons in list */
+    .icon { width:20px; height:20px; display:inline-block; margin-right:8px; vertical-align:-3px; color:#fff; }
+    .icon path, .icon circle, .icon line {
+      stroke:currentColor; fill:none; stroke-width:2; stroke-linecap:round; stroke-linejoin:round;
+    }
+
+    /* === Chat rows & bubbles === */
+    .row-user, .row-assist {
+      display:flex;
+      justify-content:flex-start;
+      align-items:flex-start;        /* prevent stretch */
+    }
+
+    /* The key: bubbles must not flex-grow or stretch */
+    .row-user > .bubble,
+    .row-assist > .bubble {
+      flex:0 0 auto;                 /* no grow, no shrink */
+      width:auto;                    /* size to content */
+      align-self:flex-start;         /* belt-and-suspenders */
+    }
+
+    /* Compact bubble */
+    .bubble {
+      display:inline-block;
+      max-width:70%;
+      padding:.6rem .9rem;
+      margin:4px 0;
+      border-radius:18px;
+      border:1px solid #333;
+      line-height:1.3;
+      word-wrap:break-word;
+      white-space:pre-wrap;
+      background:#121212;
+    }
+
+    /* User/assistant variants if you use them */
+    .bubble-user   { background:#1b1b1b; border-color:#2d2d2d; }
+    .bubble-assist { background:#121212; border-color:#2a2a2a; }
+
+    /* Trim Markdown spacing even more */
+    .bubble > * { margin:0; }
+    .bubble p + p { margin-top:.35rem; }
+    .bubble h1, .bubble h2, .bubble h3,
+    .bubble h4, .bubble h5, .bubble h6 { margin:.25rem 0; line-height:1.2; }
+    .bubble ul, .bubble ol { margin:.3rem 0 .3rem 1.1rem; padding-left:1.1rem; }
+    .bubble blockquote { margin:.3rem 0; }
+    .bubble pre, .bubble code { margin:0; }
+
+    /* Slightly smaller gap between stacked rows */
+    .mb-2 { margin-bottom:.45rem !important; }
   </style>
+
 </head>
 <body>
-  <!-- Top Navigation -->
-<nav class="navbar navbar-dark bg-dark px-3">
-  <a class="navbar-brand fw-bold text-white" href="{{ url_for('main') }}">Judion</a>
-  <div class="ms-auto">
-    {% if current_user.is_authenticated %}
-      <span class="text-white me-3">Hi, {{ current_user.username }}</span>
-      <a href="{{ url_for('logout') }}" class="btn btn-sm btn-outline-light">Logout</a>
-    {% else %}
-      <a href="{{ url_for('login') }}" class="btn btn-sm btn-outline-light me-2">Login</a>
-      <a href="{{ url_for('signup') }}" class="btn btn-sm btn-primary">Sign up</a>
-    {% endif %}
-  </div>
-</nav>
-
-<!-- Flash Messages -->
-<div class="container mt-3" style="max-width:720px;">
-  {% with msgs = get_flashed_messages(with_categories=True) %}
-    {% if msgs %}
-      {% for cat, msg in msgs %}
-        <div class="alert alert-{{ 'danger' if cat=='danger' else cat }} mb-2" role="alert">
-          {{ msg }}
-        </div>
-      {% endfor %}
-    {% endif %}
-  {% endwith %}
-</div>
-
-  <div class="container-fluid h-100">
-    <div class="row h-100">
-
-      <!-- Sidebar -->
-      <aside id="sidebar" class="col-12 col-md-4 col-lg-3 p-3">
-        <div class="d-flex align-items-center justify-content-between mb-3">
-          <div class="brand">Judion</div>
-          {% if current_user.is_authenticated %}
-            <span class="muted">Hi, {{ current_user.username }}</span>
-          {% endif %}
-        </div>
-
-        {% if current_user.is_authenticated %}
-          <!-- Toggle button reveals the inline form below -->
-          <form class="mb-2" onsubmit="event.preventDefault(); document.getElementById('debateForm').classList.toggle('d-none');">
-            <button class="btn btn-primary w-100" type="submit">+ Debate Chat</button>
-          </form>
-
-          <!-- Inline Debate Create Form (hidden by default) -->
-          <form id="debateForm" action="{{ url_for('create_debate') }}" method="post" class="mb-3 d-none">
-            <div class="mb-2">
-              <label class="form-label">Title *</label>
-              <input name="title" class="form-control" placeholder="e.g., Is AI good for education?" required>
-            </div>
-            <div class="mb-2">
-              <label class="form-label">Description (optional)</label>
-              <textarea name="description" class="form-control" rows="2" placeholder="Context or rules…"></textarea>
-            </div>
-            <div class="mb-2">
-              <label class="form-label">Custom Code (optional)</label>
-              <input name="code" class="form-control" placeholder="Leave blank to auto-generate">
-            </div>
-            <button class="btn btn-secondary w-100" type="submit">Create Debate</button>
-          </form>
-
-          <!-- Solo create stays as-is -->
-          <form action="{{ url_for('create_solo') }}" method="post" class="mb-3" id="soloForm">
-            <button class="btn btn-secondary w-100">+ Solo Chat</button>
-          </form>
-
-          <hr class="divider">
-
-          {% if chats %}
-            <div class="mt-3">
-              {% for chat in chats %}
-                <div class="chat-item mb-2 p-2 rounded">
-                  <!-- Delete button -->
-                  <form action="{{ url_for('delete_chat', chat_id=(chat.code if chat.type=='debate' else chat.sid)) }}"
-                        method="post" class="delete-form"
-                        onsubmit="return confirm('Delete this chat?');">
-                    <button type="submit" title="Delete">✕</button>
-                  </form>
-
-                  <a href="{% if chat.type=='debate' %}{{ url_for('debate_room', code=chat.code) }}{% else %}{{ url_for('solo_room', sid=chat.sid) }}{% endif %}"
-                    class="text-decoration-none text-light d-block">
-                    <div class="d-flex justify-content-between align-items-center">
-                      <div class="d-flex align-items-center">
-                        {% if chat.type == 'debate' %}
-                          <!-- debate icon -->
-                          <svg viewBox="0 0 24 24" class="icon" aria-hidden="true">
-                            <path d="M16 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-                            <circle cx="9" cy="7" r="4"/>
-                            <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
-                            <path d="M16 3.13A4 4 0 0 1 19 7"/>
-                          </svg>
-                        {% else %}
-                          <!-- solo icon -->
-                          <svg viewBox="0 0 24 24" class="icon" aria-hidden="true">
-                            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-                            <circle cx="12" cy="7" r="4"/>
-                          </svg>
-                        {% endif %}
-                        <strong>{{ chat.title }}</strong>
-                      </div>
-                      {% if chat.code %}
-                        <small>Code: {{ chat.code }}</small>
-                      {% endif %}
-                    </div>
-                    {% if chat.description %}
-                      <div class="small muted mt-1">{{ chat.description }}</div>
-                    {% endif %}
-                  </a>
-                </div>
-              {% endfor %}
-            </div>
-          {% else %}
-            <p class="muted mt-3">No chats yet. Create one above.</p>
-          {% endif %}
-        {% else %}
-          <!-- Not logged in: keep sidebar minimal -->
-          <p class="muted">Please log in to create or view chats.</p>
-        {% endif %}
-      </aside>
-
-      <!-- Main -->
-      <main id="main" class="col-12 col-md-8 col-lg-9">
-        {% block content %}{% endblock %}
-      </main>
+  <!-- Top Navigation (kept) -->
+  <nav class="navbar navbar-dark bg-dark px-3">
+    <a class="navbar-brand fw-bold text-white" href="{{ url_for('main') }}">Judion</a>
+    <div class="ms-auto">
+      {% if current_user.is_authenticated %}
+        <span class="text-white me-3">Hi, {{ current_user.username }}</span>
+        <a href="{{ url_for('logout') }}" class="btn btn-sm btn-outline-light">Logout</a>
+      {% else %}
+        <a href="{{ url_for('login') }}" class="btn btn-sm btn-outline-light me-2">Login</a>
+        <a href="{{ url_for('signup') }}" class="btn btn-sm btn-primary">Sign up</a>
+      {% endif %}
     </div>
+  </nav>
+
+  <!-- Flash messages (kept) -->
+  <div class="container mt-3" style="max-width:720px;">
+    {% with msgs = get_flashed_messages(with_categories=True) %}
+      {% if msgs %}
+        {% for cat, msg in msgs %}
+          <div class="alert alert-{{ 'danger' if cat=='danger' else cat }} mb-2" role="alert">{{ msg }}</div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+  </div>
+
+  <!-- Permanent sidebar layout -->
+  <div class="app-shell">
+    <aside id="sidebar">
+      {% if current_user.is_authenticated %}
+        <!-- Create buttons -->
+        <form class="mb-2" onsubmit="event.preventDefault(); document.getElementById('debateForm').classList.toggle('d-none');">
+          <button class="btn btn-primary w-100" type="submit">+ Debate Chat</button>
+        </form>
+
+        <!-- Inline Debate Create Form (hidden by default) -->
+        <form id="debateForm" action="{{ url_for('create_debate') }}" method="post" class="mb-3 d-none">
+          <div class="mb-2">
+            <label class="form-label">Title *</label>
+            <input name="title" class="form-control" placeholder="e.g., Is AI good for education?" required>
+          </div>
+          <div class="mb-2">
+            <label class="form-label">Description (optional)</label>
+            <textarea name="description" class="form-control" rows="2" placeholder="Context or rules…"></textarea>
+          </div>
+          <div class="mb-2">
+            <label class="form-label">Custom Code (optional)</label>
+            <input name="code" class="form-control" placeholder="Leave blank to auto-generate">
+          </div>
+          <button class="btn btn-secondary w-100" type="submit">Create Debate</button>
+        </form>
+
+        <!-- Solo create -->
+        <form action="{{ url_for('create_solo') }}" method="post" class="mb-2" id="soloForm">
+          <button class="btn btn-secondary w-100">+ Solo Chat</button>
+        </form>
+        <!-- Join Debate by Code -->
+        <form class="mt-0 mb-3" onsubmit="event.preventDefault(); document.getElementById('joinForm').classList.toggle('d-none');">
+          <button class="btn btn-secondary w-100" type="submit">↪ Join Debate Chat</button>
+        </form>
+
+        <form id="joinForm" action="{{ url_for('join_debate') }}" method="post" class="mb-3 d-none">
+          <div class="mb-2">
+            <label class="form-label">Room Code</label>
+            <input name="code" class="form-control" placeholder="e.g., 3F9KQZ" required>
+          </div>
+          <button class="btn btn-primary w-100" type="submit">Join</button>
+        </form>
+
+        <hr class="divider">
+
+        {% if chats %}
+          <div class="mt-3">
+            {% for chat in chats %}
+              <div class="chat-item mb-2 p-2">
+                <form action="{{ url_for('delete_chat', chat_id=(chat.code if chat.type=='debate' else chat.sid)) }}"
+                      method="post" class="delete-form"
+                      onsubmit="return confirm('Delete this chat?');">
+                  <button type="submit" title="Delete">✕</button>
+                </form>
+
+                <a href="{% if chat.type=='debate' %}{{ url_for('debate_room', code=chat.code) }}{% else %}{{ url_for('solo_room', sid=chat.sid) }}{% endif %}"
+                   class="text-decoration-none text-light d-block">
+                  <div class="d-flex justify-content-between align-items-center">
+                    <div class="d-flex align-items-center">
+                      {% if chat.type == 'debate' %}
+                        <svg viewBox="0 0 24 24" class="icon" aria-hidden="true">
+                          <path d="M16 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                          <circle cx="9" cy="7" r="4"/>
+                          <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
+                          <path d="M16 3.13A4 4 0 0 1 19 7"/>
+                        </svg>
+                      {% else %}
+                        <svg viewBox="0 0 24 24" class="icon" aria-hidden="true">
+                          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                          <circle cx="12" cy="7" r="4"/>
+                        </svg>
+                      {% endif %}
+                      <strong>{{ chat.title }}</strong>
+                    </div>
+                    {% if chat.code %}
+                      <small class="muted">Code: {{ chat.code }}</small>
+                    {% endif %}
+                  </div>
+                  {% if chat.description %}
+                    <div class="small muted mt-1">{{ chat.description }}</div>
+                  {% endif %}
+                </a>
+              </div>
+            {% endfor %}
+          </div>
+        {% else %}
+          <p class="muted mt-3">No chats yet. Create one above.</p>
+        {% endif %}
+      {% else %}
+        <p class="muted">Please log in to create or view chats.</p>
+      {% endif %}
+    </aside>
+
+    <main id="main">
+      {% block content %}{% endblock %}
+    </main>
   </div>
 </body>
 </html>

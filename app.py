@@ -8,11 +8,14 @@ from flask_login import (
     LoginManager, UserMixin, login_user, login_required,
     logout_user, current_user
 )
-import random, string, time, os
+import random, string, time, os, re
 from dotenv import load_dotenv
 from openai import OpenAI
 from markupsafe import Markup
+
 import markdown2
+import bleach
+
 from flask_socketio import SocketIO, join_room, leave_room
 
 import sys
@@ -79,22 +82,64 @@ def inject_chats():
     # We keep your existing sidebar list in session for now
     return {"chats": session.get("chats", [])}
 
+def _markdown_to_openai_content(text: str):
+    content = []
+    pattern = re.compile(r'!\[[^\]]*\]\(([^)]+)\)')
+    last_idx = 0
+    source = text or ""
+    for match in pattern.finditer(source):
+        start, end = match.span()
+        if start > last_idx:
+            chunk = source[last_idx:start].strip()
+            if chunk:
+                content.append({"type": "text", "text": chunk})
+        image_url = match.group(1).strip()
+        if image_url:
+            content.append({
+                "type": "image_url",
+                "image_url": {"url": image_url}
+            })
+        last_idx = end
+    trailing = source[last_idx:].strip()
+    if trailing:
+        content.append({"type": "text", "text": trailing})
+    if not content:
+        content.append({"type": "text", "text": source})
+    return content
+
+def _response_text(message_content):
+    if isinstance(message_content, str):
+        return message_content.strip()
+    parts = []
+    for part in message_content or []:
+        if part.get("type") == "text" and part.get("text"):
+            parts.append(part["text"])
+    return "\n\n".join(parts).strip()
+
+def _call_gpt(messages):
+    resp = client.chat.completions.create(
+        model="gpt-4o",
+        messages=messages
+    )
+    return _response_text(resp.choices[0].message.content)
+
 # ---------- Background workers (GLOBAL_* only) ----------
 def _bg_ai_reply_for_solo(sid: str):
     key = f"solo:{sid}"
     msgs = GLOBAL_MESSAGES.get(key, [])
-    history = [{"role": "system", "content": "You are Judion, a helpful AI assistant."}]
+    history = [{
+        "role": "system",
+        "content": [{
+            "type": "text",
+            "text": "You are Judion, a helpful AI assistant. Respond using Markdown and wrap any code in fenced code blocks."
+        }]
+    }]
     for m in msgs:
-        history.append({"role": m["role"], "content": m["text"]})
+        history.append({"role": m["role"], "content": _markdown_to_openai_content(m["text"])})
     try:
         if not client:
             raise RuntimeError("No OpenAI client configured.")
-        resp = client.chat.completions.create(
-            model="gpt-4o",
-            messages=history,
-            max_completion_tokens=300
-        )
-        ai_text = resp.choices[0].message.content.strip()
+        ai_text = _call_gpt(history)
     except Exception as e:
         ai_text = f"(Error: {e})"
     msgs.append({"user": "AI", "role": "assistant", "text": ai_text, "ts": int(time.time())})
@@ -106,28 +151,28 @@ def _bg_judge_reply_for_debate(code: str):
     msgs = GLOBAL_MESSAGES.get(key, [])
     history = [{
         "role": "system",
-        "content": (
-            "You are Judion, a **neutral debate judge**. "
-            "Read the arguments from all participants carefully. "
-            "Your job is to:\n"
-            "1. Summarize key points from each side 📝\n"
-            "2. Evaluate strengths & weaknesses ⚖️\n"
-            "3. Deliver a fair verdict 🎯\n\n"
-            "Always format your reply with Markdown (headings, bullet points, emojis)."
-        )
+        "content": [{
+            "type": "text",
+            "text": (
+                "You are Judion, a **neutral debate judge**. "
+                "Read the arguments from all participants carefully. "
+                "Your job is to:\n"
+                "1. Summarize key points from each side 📝\n"
+                "2. Evaluate strengths & weaknesses ⚖️\n"
+                "3. Deliver a fair verdict 🎯\n\n"
+                "Always format your reply with Markdown (headings, bullet points, emojis) and wrap any code in fenced code blocks."
+            )
+        }]
     }]
     for m in msgs:
         role = "user" if m["role"] == "user" else "assistant"
-        history.append({"role": role, "content": f"{m['user']}: {m['text']}"})
+        history.append({"role": role, "content": _markdown_to_openai_content(m["text"])})
     try:
         if not client:
             raise RuntimeError("No OpenAI client configured.")
-        resp = client.chat.completions.create(
-            model="gpt-4o",
-            messages=history,
-            max_completion_tokens=400
-        )
-        ai_text = resp.choices[0].message.content.strip()
+        ai_text = _call_gpt(history)
+        if ai_text.lower().startswith("judge:"):
+            ai_text = ai_text.split(":", 1)[1].lstrip()
     except Exception as e:
         ai_text = f"(Error from Judge: {e})"
     msgs.append({"user": "Judge", "role": "assistant", "text": ai_text, "ts": int(time.time())})
@@ -349,6 +394,7 @@ def solo_message(sid):
     # Fallback for normal form POST
     return redirect(url_for("solo_room", sid=sid))
 
+
 # ----- Delete chat -----
 @app.post("/delete/<chat_id>")
 @login_required
@@ -372,6 +418,33 @@ def delete_chat(chat_id):
         session.modified = True
     return redirect(url_for("main"))
 
+@app.post("/rename/<chat_id>")
+@login_required
+def rename_chat(chat_id):
+    new_title = (request.form.get("title") or "").strip()
+    if not new_title:
+        return ("", 204)
+
+    chats = session.get("chats", [])
+    updated = False
+    chat_type = request.form.get("type")
+
+    for chat in chats:
+        if chat_type == "debate" and chat.get("type") == "debate" and chat.get("code") == chat_id:
+            chat["title"] = new_title
+            GLOBAL_DEBATES.get(chat_id, {}).update({"title": new_title})
+            updated = True
+            break
+        if chat_type == "solo" and chat.get("type") == "solo" and chat.get("sid") == chat_id:
+            chat["title"] = new_title
+            updated = True
+            break
+
+    if updated:
+        session["chats"] = chats
+        session.modified = True
+    return ("", 204)
+
 # ----- Local dev entry (Render uses gunicorn) -----
 if __name__ == "__main__":
     socketio.run(
@@ -381,3 +454,60 @@ if __name__ == "__main__":
         port=int(os.environ.get("PORT", 5002)),
         use_reloader=False,
     )
+# AI + Markdown + Bleach setup
+
+# Allow Markdown2 features like fenced code blocks, tables, etc.
+_MD_EXTRAS = [
+    "fenced-code-blocks", "tables", "strike", "code-friendly",
+    "cuddled-lists", "task_list", "spoiler"
+]
+
+# Restrictive, safe HTML allowlist (expand if you need more tags)
+_ALLOWED_TAGS = [
+    "p","br","hr","pre","code","blockquote","ul","ol","li","strong","em","del",
+    "h1","h2","h3","h4","h5","h6","table","thead","tbody","tr","th","td","span",
+    "a","img"
+]
+_ALLOWED_ATTRS = {
+    "a": ["href","title","target","rel"],
+    "code": ["class"],
+    "span": ["class"],
+    "img": ["src","alt","title"]
+}
+_ALLOWED_PROTOCOLS = ["http", "https", "mailto", "data"]
+# Optional: ensure links open safely
+def _link_rel_target(attrs, new=False):
+    href = attrs.get("href", "")
+    if href.startswith("javascript:"):
+        attrs["href"] = "#"
+    attrs["target"] = "_blank"
+    attrs["rel"] = "noopener noreferrer"
+    return attrs
+
+def render_markdown(md_text: str) -> str:
+    """
+    Convert Markdown to HTML (with fenced code blocks) and sanitize it.
+    Returns safe HTML ready to insert into templates.
+    """
+    md_html = markdown2.markdown(md_text or "", extras=_MD_EXTRAS)
+
+    # Sanitize (prevents XSS) but keep our code/headers/etc.
+    clean = bleach.clean(
+        md_html,
+        tags=_ALLOWED_TAGS,
+        attributes=_ALLOWED_ATTRS,
+        protocols=_ALLOWED_PROTOCOLS,
+        strip=True,
+    )
+    # Linkify after clean so URLs become <a> tags, then re-sanitize a tiny bit
+    linkified = bleach.linkify(clean, callbacks=[bleach.linkifier.Callback(_link_rel_target)])
+
+    return linkified
+
+# Jinja filter (replace your existing simple one)
+from markupsafe import Markup
+
+@app.template_filter("markdown")
+def markdown_filter(text):
+    return Markup(render_markdown(text))
+# End Markdown + Bleach setup   

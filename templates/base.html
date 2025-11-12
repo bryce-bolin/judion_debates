@@ -7,33 +7,17 @@
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
   <style>
-    :root { --bg:#000; --text:#fff; --muted:#aaa; --panel:#111; --line:#333; }
+    :root { --bg:#000; --text:#fff; --muted:#aaa; --panel:#111; --line:#272727; --code-bg:#0f1115; --code-border:#2a2f3a; }
     * { box-sizing: border-box; }
-   html, body { height:100%; background:var(--bg); color:var(--text); font-family:'Inter',system-ui,sans-serif; }
+    html, body { height:100%; background:var(--bg); color:var(--text); font-family:'Inter',system-ui,sans-serif; }
 
     /* Top navbar */
-    .navbar { border-bottom:1px solid #272727; }
+    .navbar { border-bottom:1px solid var(--line); }
 
     /* ===== Permanent sidebar layout ===== */
-    .app-shell {
-      height: calc(100vh - 56px); /* 56px ≈ default .navbar height */
-      display: flex;
-      min-height: 0; /* allow children to scroll */
-    }
-    #sidebar {
-      width: 280px;               /* fixed width so it never collapses */
-      background: var(--panel);
-      border-right: 1px solid #272727;
-      padding: 14px;
-      overflow-y: auto;
-    }
-    #main {
-      flex: 1;
-      min-width: 0;
-      padding: 18px;
-      overflow-y: auto;
-      background: #000;
-    }
+    .app-shell { height: calc(100vh - 56px); display: flex; min-height: 0; }
+    #sidebar { width: 280px; background: var(--panel); border-right: 1px solid var(--line); padding: 14px; overflow-y: auto; }
+    #main    { flex: 1; min-width: 0; padding: 18px; overflow-y: auto; background: #000; }
 
     /* Buttons */
     .btn-primary, .btn-secondary { background:#fff; color:#000; border:none; }
@@ -43,12 +27,7 @@
     .divider { border-color:#444; }
     .muted { color:var(--muted); }
 
-    input, textarea {
-      background:#111 !important;
-      color:var(--text) !important;
-      border:1px solid #444 !important;
-      border-radius:14px !important;
-    }
+    input, textarea { background:#111 !important; color:#fff !important; border:1px solid #444 !important; border-radius:14px !important; }
 
     .chat-item {
       background:#141414;
@@ -57,70 +36,186 @@
       position:relative;
       border-radius:14px;
     }
+    .chat-item.menu-open { z-index:100; }
     .chat-item small { color:var(--muted); }
 
-    /* delete X */
-    .delete-form { position:absolute; top:4px; right:6px; }
-    .delete-form button {
-      background:none; border:none; color:#888; font-size:14px; padding:0; cursor:pointer;
+    .chat-actions { position:absolute; top:50%; right:12px; transform:translateY(-50%); display:flex; flex-direction:column; align-items:center; gap:0; z-index:2; }
+    .chat-menu-toggle {
+      background:none; border:none; color:#888; font-size:20px; line-height:.3;
+      padding:0; cursor:pointer; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px;
     }
-    .delete-form button:hover { color:#f55; }
+    .chat-menu-toggle span{
+      display:block;
+      width:3px;
+      height:3px;
+      background:currentColor;
+      border-radius:50%;
+    }
+    .chat-menu-toggle:focus-visible{ outline:2px solid #666; border-radius:4px; }
+    .chat-menu {
+      position:absolute;
+      top:50%;
+      transform:translateY(-50%);
+      right:calc(100% + 8px);
+      z-index:50;
+      background:#1a1a1a;
+      border:1px solid #2c2c2c;
+      border-radius:10px;
+      padding:.35rem;
+      min-width:140px;
+      box-shadow:0 6px 20px rgba(0,0,0,.45);
+    }
+    .chat-menu[hidden]{ display:none; }
+    .chat-menu button,
+    .chat-menu form button{
+      width:100%; text-align:left; background:none; border:none; color:#ddd; font-size:.85rem;
+      padding:.25rem .2rem; border-radius:6px; cursor:pointer;
+    }
+    .chat-menu button:hover,
+    .chat-menu form button:hover{ background:#2a2a2a; color:#fff; }
 
-    /* Tiny icons in list */
     .icon { width:20px; height:20px; display:inline-block; margin-right:8px; vertical-align:-3px; color:#fff; }
-    .icon path, .icon circle, .icon line {
-      stroke:currentColor; fill:none; stroke-width:2; stroke-linecap:round; stroke-linejoin:round;
-    }
+    .icon path, .icon circle, .icon line { stroke:currentColor; fill:none; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
 
-    /* === Chat rows & bubbles === */
-    .row-user, .row-assist {
-      display:flex;
-      justify-content:flex-start;
-      align-items:flex-start;        /* prevent stretch */
-    }
+    /* === Chat rows & bubbles (used by room templates) === */
+    .row-user, .row-assist { display:flex; justify-content:flex-start; align-items:flex-start; gap:.3rem; }
+    .row-user > .bubble, .row-assist > .bubble { flex:0 0 auto; width:auto; align-self:flex-start; }
 
-    /* The key: bubbles must not flex-grow or stretch */
-    .row-user > .bubble,
-    .row-assist > .bubble {
-      flex:0 0 auto;                 /* no grow, no shrink */
-      width:auto;                    /* size to content */
-      align-self:flex-start;         /* belt-and-suspenders */
-    }
-
-    /* Compact bubble */
+    /* Compact bubbles */
     .bubble {
-      display:inline-block;
+      display:inline-flex;
+      flex-direction:column;
+      gap:.08rem;
       max-width:70%;
-      padding:.6rem .9rem;
-      margin:4px 0;
-      border-radius:18px;
+      padding:.34rem .7rem;
+      margin:.12rem 0;
+      border-radius:14px;
       border:1px solid #333;
-      line-height:1.3;
+      font-size:.95rem;
+      line-height:1.18;
       word-wrap:break-word;
       white-space:pre-wrap;
       background:#121212;
     }
-
-    /* User/assistant variants if you use them */
     .bubble-user   { background:#1b1b1b; border-color:#2d2d2d; }
     .bubble-assist { background:#121212; border-color:#2a2a2a; }
 
-    /* Trim Markdown spacing even more */
-    .bubble > * { margin:0; }
-    .bubble p + p { margin-top:.35rem; }
-    .bubble h1, .bubble h2, .bubble h3,
-    .bubble h4, .bubble h5, .bubble h6 { margin:.25rem 0; line-height:1.2; }
-    .bubble ul, .bubble ol { margin:.3rem 0 .3rem 1.1rem; padding-left:1.1rem; }
-    .bubble blockquote { margin:.3rem 0; }
-    .bubble pre, .bubble code { margin:0; }
+    /* Trim markdown spacing INSIDE bubbles only (prevents tall messages) */
+    .bubble .md,
+    .bubble .md-body{
+      line-height:1.2;
+      font-size:.95rem;
+    }
+    .bubble .md-body > * { margin:0; }
+    .bubble .md-body p + p { margin-top:.12rem; }
+    .bubble .md h1,
+    .bubble .md h2,
+    .bubble .md h3,
+    .bubble .md h4,
+    .bubble .md h5,
+    .bubble .md h6{
+      font-weight:650;
+      font-size:1rem;
+      margin:.1rem 0 .06rem;
+      line-height:1.15;
+    }
+    .bubble .md ul,
+    .bubble .md ol{
+      margin:.08rem 0 .12rem 1.05rem;
+      padding-left:1.05rem;
+      list-style-position:outside;
+    }
+    .bubble .md li{ margin:.04rem 0; }
+    .bubble .md li::marker{
+      font-weight:600;
+      color:#cdd5e0;
+    }
+    .bubble blockquote { margin:.15rem 0; }
+    .mb-2 { margin-bottom:.24rem !important; } /* less gap between rows */
 
-    /* Slightly smaller gap between stacked rows */
-    .mb-2 { margin-bottom:.45rem !important; }
+    /* ===== ChatGPT-style code block ===== */
+    .codewrap {
+      border:1px solid var(--code-border);
+      border-radius:14px;
+      overflow:hidden;             /* one smooth shape */
+      background:var(--code-bg);
+      margin:.28rem 0;             /* tight in bubbles */
+    }
+    .codewrap-header {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:.75rem;
+      padding:.38rem .65rem;
+      background:var(--code-bg);
+      border-bottom:1px solid var(--code-border);
+    }
+    .code-lang {
+      text-transform:uppercase;
+      letter-spacing:.08em;
+      font-size:.68rem;
+      font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      color:#d4d9e5;
+      user-select:none;
+      border:1px solid rgba(203,213,225,.35);
+      border-radius:999px;
+      padding:.12rem .6rem;
+      background:rgba(203,213,225,.12);
+    }
+    .copy-btn {
+      font-size:.73rem;
+      padding:.2rem .65rem;
+      border-radius:999px;
+      border:1px solid rgba(148,163,184,.4);
+      background:#1b2535;
+      color:#dae1ef;
+      cursor:pointer;
+      transition:transform .05s ease, background .12s ease;
+    }
+    .copy-btn:active { transform:translateY(1px); }
+    .copy-btn.copied { color:#9AE6B4; border-color:#2f6b56; }
+    .copy-btn:hover { background:#253146; }
+
+    .codewrap-body { background:var(--code-bg); }
+    .codewrap pre {
+      margin:0; padding:.85rem 1rem; background:transparent; color:#e6edf3; overflow:auto;
+      line-height:1.32; font-size:.92rem; tab-size:2; white-space:pre;
+      border-top-left-radius:0; border-top-right-radius:0; border-bottom-left-radius:14px; border-bottom-right-radius:14px;
+      position:relative;
+    }
+    /* Kill any inline copy buttons some other script might inject into <pre> */
+    .codewrap pre > .copy-btn { display:none !important; }
+
+    /* Inline code (not blocks) */
+    code:not(pre code) {
+      background:#111827; color:#f472b6; padding:0 .25rem; border-radius:.35rem; border:1px solid #1f2937;
+    }
+
+    /* Username meta smaller */
+    .meta{
+      font-size:.7rem;
+      margin-bottom:.02rem;
+      color:#a8a8a8;
+      letter-spacing:0;
+      text-transform:none;
+    }
+
+    .ai-line{
+      display:block;
+      max-width:70%;
+      color:#f5f5f5;
+      font-size:.95rem;
+      line-height:1.2;
+      margin:.12rem 0;
+    }
+
+    /* Nuke any leftover inline copy buttons that other scripts added inside <pre> */
+    #main .codewrap pre > .copy-btn{ display:none !important; }
+
   </style>
-
 </head>
 <body>
-  <!-- Top Navigation (kept) -->
+  <!-- Top Navigation -->
   <nav class="navbar navbar-dark bg-dark px-3">
     <a class="navbar-brand fw-bold text-white" href="{{ url_for('main') }}">Judion</a>
     <div class="ms-auto">
@@ -134,7 +229,7 @@
     </div>
   </nav>
 
-  <!-- Flash messages (kept) -->
+  <!-- Flash messages -->
   <div class="container mt-3" style="max-width:720px;">
     {% with msgs = get_flashed_messages(with_categories=True) %}
       {% if msgs %}
@@ -149,12 +244,10 @@
   <div class="app-shell">
     <aside id="sidebar">
       {% if current_user.is_authenticated %}
-        <!-- Create buttons -->
         <form class="mb-2" onsubmit="event.preventDefault(); document.getElementById('debateForm').classList.toggle('d-none');">
           <button class="btn btn-primary w-100" type="submit">+ Debate Chat</button>
         </form>
 
-        <!-- Inline Debate Create Form (hidden by default) -->
         <form id="debateForm" action="{{ url_for('create_debate') }}" method="post" class="mb-3 d-none">
           <div class="mb-2">
             <label class="form-label">Title *</label>
@@ -171,15 +264,13 @@
           <button class="btn btn-secondary w-100" type="submit">Create Debate</button>
         </form>
 
-        <!-- Solo create -->
         <form action="{{ url_for('create_solo') }}" method="post" class="mb-2" id="soloForm">
           <button class="btn btn-secondary w-100">+ Solo Chat</button>
         </form>
-        <!-- Join Debate by Code -->
+
         <form class="mt-0 mb-3" onsubmit="event.preventDefault(); document.getElementById('joinForm').classList.toggle('d-none');">
           <button class="btn btn-secondary w-100" type="submit">↪ Join Debate Chat</button>
         </form>
-
         <form id="joinForm" action="{{ url_for('join_debate') }}" method="post" class="mb-3 d-none">
           <div class="mb-2">
             <label class="form-label">Room Code</label>
@@ -193,35 +284,42 @@
         {% if chats %}
           <div class="mt-3">
             {% for chat in chats %}
-              <div class="chat-item mb-2 p-2">
-                <form action="{{ url_for('delete_chat', chat_id=(chat.code if chat.type=='debate' else chat.sid)) }}"
-                      method="post" class="delete-form"
+              <div class="chat-item mb-2 p-2 position-relative">
+                <div class="chat-actions">
+                  <button type="button" class="chat-menu-toggle" aria-haspopup="true" aria-expanded="false">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                  </button>
+                  <div class="chat-menu" hidden>
+                    <button type="button"
+                            class="chat-rename-btn"
+                            data-chat-id="{{ chat.code if chat.type=='debate' else chat.sid }}"
+                            data-chat-type="{{ chat.type }}"
+                            data-current-title="{{ chat.title }}"
+                    >Rename</button>
+                    <form action="{{ url_for('delete_chat', chat_id=(chat.code if chat.type=='debate' else chat.sid)) }}"
+                      method="post"
                       onsubmit="return confirm('Delete this chat?');">
-                  <button type="submit" title="Delete">✕</button>
-                </form>
+                      <button type="submit">Delete</button>
+                    </form>
+                  </div>
+                </div>
 
                 <a href="{% if chat.type=='debate' %}{{ url_for('debate_room', code=chat.code) }}{% else %}{{ url_for('solo_room', sid=chat.sid) }}{% endif %}"
                    class="text-decoration-none text-light d-block">
-                  <div class="d-flex justify-content-between align-items-center">
+                  <div class="d-flex flex-column gap-1">
+                    {% if chat.code %}
+                      <small class="muted text-uppercase">Code: {{ chat.code }}</small>
+                    {% endif %}
                     <div class="d-flex align-items-center">
                       {% if chat.type == 'debate' %}
-                        <svg viewBox="0 0 24 24" class="icon" aria-hidden="true">
-                          <path d="M16 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-                          <circle cx="9" cy="7" r="4"/>
-                          <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
-                          <path d="M16 3.13A4 4 0 0 1 19 7"/>
-                        </svg>
+                        <ion-icon name="people-outline" class="icon"></ion-icon>
                       {% else %}
-                        <svg viewBox="0 0 24 24" class="icon" aria-hidden="true">
-                          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-                          <circle cx="12" cy="7" r="4"/>
-                        </svg>
+                        <ion-icon name="person-outline" class="icon"></ion-icon>
                       {% endif %}
-                      <strong>{{ chat.title }}</strong>
+                      <strong class="ms-1">{{ chat.title }}</strong>
                     </div>
-                    {% if chat.code %}
-                      <small class="muted">Code: {{ chat.code }}</small>
-                    {% endif %}
                   </div>
                   {% if chat.description %}
                     <div class="small muted mt-1">{{ chat.description }}</div>
@@ -242,5 +340,169 @@
       {% block content %}{% endblock %}
     </main>
   </div>
+
+  <!-- Markdown + Code wrapper (single source of truth) -->
+  <script src="https://cdn.jsdelivr.net/npm/markdown-it@13.0.2/dist/markdown-it.min.js"></script>
+  <script type="module" src="https://cdn.jsdelivr.net/npm/ionicons@7.1.0/dist/ionicons/ionicons.esm.js"></script>
+  <script nomodule src="https://cdn.jsdelivr.net/npm/ionicons@7.1.0/dist/ionicons/ionicons.js"></script>
+  <script>
+    (function () {
+      // 1) Markdown renderer (safe: HTML disabled)
+      const md = window.markdownit({ html:false, breaks:true, linkify:true });
+      window.renderMarkdown = (t) => md.render(t || "");
+
+      // Remove any inline copy buttons some other script might place inside <pre>
+      function stripInlineCopyButtons(scope) {
+        (scope || document).querySelectorAll('pre > .copy-btn').forEach(btn => btn.remove());
+      }
+
+      // 2) Wrap <pre><code> once, add a single header "Copy code" that copies the entire code block
+      window.enhanceCodeBlocks = function (root) {
+        (root || document).querySelectorAll('pre > code').forEach(codeEl => {
+          const pre = codeEl.parentElement;
+          if (!pre || pre.closest('.codewrap')) return;   // already wrapped
+
+          const m = codeEl.className.match(/language-([a-z0-9]+)/i);
+          const lang = (m ? m[1] : 'text').toUpperCase();
+
+          const wrap = document.createElement('figure');
+          wrap.className = 'codewrap';
+
+          const header = document.createElement('div');
+          header.className = 'codewrap-header';
+
+          const label = document.createElement('span');
+          label.className = 'code-lang';
+          label.textContent = lang;
+
+          const copy = document.createElement('button');
+          copy.type = 'button';
+          copy.className = 'copy-btn';
+          copy.textContent = 'Copy code';
+          copy.setAttribute('aria-live', 'polite');
+
+          const body = document.createElement('div');
+          body.className = 'codewrap-body';
+
+          pre.replaceWith(wrap);
+          wrap.appendChild(header);
+          header.appendChild(label);
+          header.appendChild(copy);
+          wrap.appendChild(body);
+          body.appendChild(pre);
+
+          copy.addEventListener('click', async () => {
+            const codeNode = pre.querySelector('code');
+            const textToCopy = codeNode ? codeNode.textContent : pre.textContent;
+
+            // Clipboard API (secure contexts) + reliable fallback
+            async function tryClipboardAPI() { await navigator.clipboard.writeText(textToCopy); }
+            function fallbackCopy() {
+              const ta = document.createElement('textarea');
+              ta.value = textToCopy;
+              ta.style.position = 'fixed';
+              ta.style.top = '-1000px';
+              ta.style.opacity = '0';
+              document.body.appendChild(ta);
+              ta.focus(); ta.select();
+              try { document.execCommand('copy'); } catch(_) {}
+              document.body.removeChild(ta);
+            }
+
+            try {
+              if (navigator.clipboard && window.isSecureContext) { await tryClipboardAPI(); }
+              else { fallbackCopy(); }
+              copy.classList.add('copied');
+              const old = copy.textContent;
+              copy.textContent = '✓ Copied';
+              setTimeout(() => { copy.textContent = old; copy.classList.remove('copied'); }, 1200);
+            } catch {
+              fallbackCopy();
+              copy.classList.add('copied');
+              const old = copy.textContent;
+              copy.textContent = '✓ Copied';
+              setTimeout(() => { copy.textContent = old; copy.classList.remove('copied'); }, 1200);
+            }
+          });
+        });
+
+        stripInlineCopyButtons(root);
+      };
+
+      // 3) Initial run + observe for new messages
+      document.addEventListener('DOMContentLoaded', () => {
+        const target = document.getElementById('main') || document.body;
+        window.enhanceCodeBlocks(target);
+
+        const mo = new MutationObserver(muts => {
+          for (const m of muts) {
+            m.addedNodes.forEach(n => {
+              if (n.nodeType === 1) {
+                window.enhanceCodeBlocks(n);
+                stripInlineCopyButtons(n);
+              }
+            });
+          }
+        });
+        mo.observe(target, { childList:true, subtree:true });
+      });
+
+      // Chat menu handling (rename/delete)
+      function closeAllMenus(except) {
+        document.querySelectorAll('.chat-menu').forEach(menu => {
+          if (menu !== except) {
+            menu.hidden = true;
+            menu.closest('.chat-item')?.classList.remove('menu-open');
+          }
+        });
+        document.querySelectorAll('.chat-menu-toggle').forEach(btn => btn.setAttribute('aria-expanded', 'false'));
+      }
+
+      document.addEventListener('click', (event) => {
+        const toggle = event.target.closest('.chat-menu-toggle');
+        if (toggle) {
+          const actions = toggle.parentElement;
+          const menu = actions.querySelector('.chat-menu');
+          const isHidden = menu.hidden;
+          closeAllMenus(isHidden ? menu : null);
+          if (isHidden) {
+            menu.hidden = false;
+            actions.closest('.chat-item')?.classList.add('menu-open');
+            toggle.setAttribute('aria-expanded', 'true');
+          } else {
+            menu.hidden = true;
+            toggle.setAttribute('aria-expanded', 'false');
+            actions.closest('.chat-item')?.classList.remove('menu-open');
+          }
+          return;
+        }
+
+        const renameBtn = event.target.closest('.chat-rename-btn');
+        if (renameBtn) {
+          const current = renameBtn.dataset.currentTitle || '';
+          const newTitle = prompt('Rename chat to:', current);
+          if (newTitle && newTitle.trim()) {
+            fetch(`{{ url_for('rename_chat', chat_id='__CHAT__') }}`.replace('__CHAT__', renameBtn.dataset.chatId), {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-Requested-With': 'XMLHttpRequest'
+              },
+              body: new URLSearchParams({ title: newTitle.trim(), type: renameBtn.dataset.chatType })
+            }).then(() => window.location.reload());
+          }
+          closeAllMenus();
+          return;
+        }
+
+        if (!event.target.closest('.chat-actions')) {
+          closeAllMenus();
+        }
+      });
+    })();
+  </script>
+
+  <!-- Your app-level JS (can still exist; this file neutralizes duplicate copy buttons) -->
+  <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 </body>
 </html>

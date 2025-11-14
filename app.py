@@ -1,7 +1,7 @@
 import eventlet
 eventlet.monkey_patch()
 
-from flask import Flask, render_template, request, redirect, url_for, session, abort, flash
+from flask import Flask, render_template, request, redirect, url_for, session, abort, flash, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_bcrypt import Bcrypt
 from flask_login import (
@@ -149,6 +149,7 @@ def _bg_ai_reply_for_solo(sid: str):
 def _bg_judge_reply_for_debate(code: str):
     key = f"debate:{code}"
     msgs = GLOBAL_MESSAGES.get(key, [])
+    participants = sorted(list(GLOBAL_DEBATES.get(code, {}).get("participants", [])))
     history = [{
         "role": "system",
         "content": [{
@@ -160,7 +161,9 @@ def _bg_judge_reply_for_debate(code: str):
                 "1. Summarize key points from each side 📝\n"
                 "2. Evaluate strengths & weaknesses ⚖️\n"
                 "3. Deliver a fair verdict 🎯\n\n"
-                "Always format your reply with Markdown (headings, bullet points, emojis) and wrap any code in fenced code blocks."
+                "Always format your reply with Markdown (headings, bullet points, emojis) and wrap any code in fenced code blocks. "
+                "Keep the verdict very short (ideally 2-3 sentences) using simple, clear language while preserving key details. "
+                f"You may reference participants using @username. Participants: {', '.join(participants) if participants else 'N/A'}."
             )
         }]
     }]
@@ -256,15 +259,26 @@ def create_debate():
     description = (request.form.get("description") or "").strip()
     code = (request.form.get("code") or generate_code()).strip().upper()
 
-    chat = {"type": "debate", "title": title, "description": description, "code": code}
+    chat_meta = {
+        "type": "debate",
+        "title": title,
+        "description": description,
+        "code": code,
+    }
 
-    GLOBAL_DEBATES[code] = chat
+    GLOBAL_DEBATES[code] = {
+        **chat_meta,
+        "phase": "claim",
+        "claims_submitted": set(),
+        "counter_submitted": set(),
+        "participants": {current_user.username},
+    }
     GLOBAL_MESSAGES.setdefault(f"debate:{code}", [])
 
     session.setdefault("chats", [])
     session["chats"] = [c for c in session["chats"]
                         if not (c.get("type") == "debate" and c.get("code") == code)]
-    session["chats"].insert(0, chat)
+    session["chats"].insert(0, chat_meta)
     session.modified = True
 
         # If AJAX request, don't redirect; keep the page in place
@@ -283,8 +297,15 @@ def join_debate():
 
     session.setdefault("chats", [])
     if not any(c.get("type") == "debate" and c.get("code") == code for c in session["chats"]):
-        session["chats"].insert(0, room)
+        session["chats"].insert(0, {
+            "type": "debate",
+            "title": room.get("title"),
+            "description": room.get("description", ""),
+            "code": code,
+        })
         session.modified = True
+    if room.get("phase", "claim") == "claim":
+        room.setdefault("participants", set()).add(current_user.username)
 
     return redirect(url_for("debate_room", code=code))
 
@@ -311,38 +332,126 @@ def debate_room(code):
         abort(404)
     key = f"debate:{code}"
     GLOBAL_MESSAGES.setdefault(key, [])
-    return render_template("debate_room.html", room=room, messages=GLOBAL_MESSAGES[key])
+    phase = room.setdefault("phase", "claim")
+    participants = room.setdefault("participants", set())
+    claims = room.setdefault("claims_submitted", set())
+    counter = room.setdefault("counter_submitted", set())
+    user = current_user.username
+    has_claim = user in claims
+    has_counter = user in counter
+    can_submit = True
+    status_msg = ""
+    phase_label = "Claim phase" if phase == "claim" else ("Counterclaim phase" if phase == "counterclaim" else "Debate finished")
+
+    if phase == "claim" and has_claim:
+        can_submit = False
+        status_msg = "Waiting for other participants to submit their claims."
+    elif phase == "counterclaim":
+        if has_counter:
+            can_submit = False
+            status_msg = "Waiting for other participants to submit their counterclaims."
+    elif phase == "finished":
+        can_submit = False
+        status_msg = "Debate finished. Awaiting judge verdict."
+
+    return render_template(
+        "debate_room.html",
+        room=room,
+        messages=GLOBAL_MESSAGES[key],
+        phase=phase,
+        has_claim=has_claim,
+        has_counter=has_counter,
+        can_submit=can_submit,
+        phase_label=phase_label,
+        status_message=status_msg,
+    )
 
 @app.post("/room/<code>/message")
 @login_required
 def debate_message(code):
-    if code not in GLOBAL_DEBATES:
+    room = GLOBAL_DEBATES.get(code)
+    if not room:
         abort(404)
 
+    def phase_error(message):
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+            return (message, 409)
+        flash(message, "warning")
+        return redirect(url_for("debate_room", code=code))
+
     text = (request.form.get("text") or "").strip()
+    if not text:
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest":
+            return ("", 204)
+        return redirect(url_for("debate_room", code=code))
+
     key = f"debate:{code}"
+    GLOBAL_MESSAGES.setdefault(key, [])
 
-    if text:
-        GLOBAL_MESSAGES.setdefault(key, [])
-        new_msg = {
-            "user": current_user.username,
-            "role": "user",
-            "text": text,
-            "ts": int(time.time())
-        }
-        GLOBAL_MESSAGES[key].append(new_msg)
+    phase = room.setdefault("phase", "claim")
+    participants = room.setdefault("participants", set())
+    claims = room.setdefault("claims_submitted", set())
+    counter = room.setdefault("counter_submitted", set())
+    user = current_user.username
+    if user not in participants:
+        if phase == "claim":
+            participants.add(user)
+        else:
+            return phase_error("This debate round is already in progress.")
 
-        # broadcast my message to everyone in the debate
-        socketio.emit("new_message", new_msg, room=key)
+    if phase == "finished":
+        return phase_error("Debate is finished. Await the judge's verdict.")
+    if phase == "claim" and user in claims:
+        return phase_error("You have already submitted your claim.")
+    if phase == "counterclaim" and user in counter:
+        return phase_error("You have already submitted your counterclaim.")
 
-        # spawn the Judge brain in an eventlet green thread
-        eventlet.spawn_n(_bg_judge_reply_for_debate, code)
+    new_msg = {
+        "user": user,
+        "role": "user",
+        "text": text,
+        "ts": int(time.time())
+    }
+    GLOBAL_MESSAGES[key].append(new_msg)
+    socketio.emit("new_message", new_msg, room=key)
 
-    # If this came from AJAX (we'll send X-Requested-With), just say "OK, no redirect"
+    phase_changed = False
+    if phase == "claim":
+        claims.add(user)
+        if len(claims) >= len(participants):
+            room["phase"] = "counterclaim"
+            room["counter_submitted"] = set()
+            phase_changed = True
+            announcement = {
+                "user": "System",
+                "role": "assistant",
+                "text": (
+                    "Great job on the claims! Counterclaim phase begins now. "
+                    "Use @username to directly respond to someone you disagree with."
+                ),
+                "ts": int(time.time())
+            }
+            GLOBAL_MESSAGES[key].append(announcement)
+            socketio.emit("new_message", announcement, room=key)
+    elif phase == "counterclaim":
+        counter.add(user)
+        if len(counter) >= len(participants):
+            room["phase"] = "finished"
+            phase_changed = True
+            eventlet.spawn_n(_bg_judge_reply_for_debate, code)
+
+    if phase_changed:
+        socketio.emit(
+            "phase_update",
+            {
+                "phase": room["phase"],
+                "participants": sorted(list(participants))
+            },
+            room=key
+        )
+
     if request.headers.get("X-Requested-With") == "XMLHttpRequest":
         return ("", 204)
-
-    # fallback for non-JS form posts
     return redirect(url_for("debate_room", code=code))
 
 # ----- Create / Solo Room -----
@@ -444,6 +553,27 @@ def rename_chat(chat_id):
         session["chats"] = chats
         session.modified = True
     return ("", 204)
+
+@app.post("/api/generate_image")
+@login_required
+def generate_image():
+    data = request.get_json(silent=True) or {}
+    prompt = (data.get("prompt") or "").strip()
+    if not prompt:
+        abort(400)
+    if not client:
+        abort(503)
+    try:
+        resp = client.images.generate(
+            model="gpt-image-1-mini",
+            prompt=prompt,
+            size="1024x1024"
+        )
+        image_b64 = resp.data[0].b64_json
+        data_url = f"data:image/png;base64,{image_b64}"
+        return jsonify({"image": data_url})
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
 
 # ----- Local dev entry (Render uses gunicorn) -----
 if __name__ == "__main__":

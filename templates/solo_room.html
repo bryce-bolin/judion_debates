@@ -81,9 +81,10 @@
     border:1px solid #1f1f1f;
     border-radius:30px;
     padding:.1rem .35rem .1rem .35rem;
-    overflow:hidden;
+    overflow:visible;
     order:2;
   }
+  .composer-plus-wrap{ position:relative; display:flex; align-items:center; overflow:visible; }
   .composer-plus{
     border:none;
     background:transparent;
@@ -102,6 +103,31 @@
     -webkit-appearance:none;
     appearance:none;
   }
+  .plus-menu{
+    position:absolute;
+    bottom:110%;
+    left:0;
+    background:#101010;
+    border:1px solid #2a2a2a;
+    border-radius:10px;
+    padding:.3rem;
+    min-width:140px;
+    box-shadow:0 8px 20px rgba(0,0,0,.45);
+    z-index:1000;
+  }
+  .plus-menu[hidden]{ display:none; }
+  .plus-menu button{
+    width:100%;
+    background:none;
+    border:none;
+    color:#ddd;
+    text-align:left;
+    padding:.25rem .15rem;
+    border-radius:6px;
+    font-size:.85rem;
+    cursor:pointer;
+  }
+  .plus-menu button:hover{ background:#1f1f1f; color:#fff; }
   .composer-plus:active{ transform:scale(.95); }
   .composer textarea{
     flex:1;
@@ -171,6 +197,26 @@
     line-height:1;
     cursor:pointer;
   }
+  .generation-chip{
+    background:#0d3b66;
+    color:#cce4ff;
+    padding:.25rem .7rem;
+    border-radius:999px;
+    font-size:.78rem;
+    letter-spacing:.08em;
+    text-transform:uppercase;
+    display:inline-flex;
+    align-items:center;
+    gap:.35rem;
+  }
+  .generation-chip button{
+    border:none;
+    background:none;
+    color:#cce4ff;
+    font-size:.85rem;
+    cursor:pointer;
+    padding:0;
+  }
 </style>
 
 <div class="chat-wrap">
@@ -203,8 +249,14 @@
   <form class="composer" action="{{ url_for('solo_message', sid=room.sid) }}" method="post">
     <label class="sr-only" for="solo-message">Message</label>
     <div class="composer-attachments" hidden aria-live="polite"></div>
-    <div class="composer-shell">
-      <button type="button" class="composer-plus" aria-label="Add image">+</button>
+    <div class="composer-shell" style="position:relative;">
+      <div class="composer-plus-wrap">
+        <button type="button" class="composer-plus" aria-label="Add options">+</button>
+        <div class="plus-menu" hidden>
+          <button type="button" class="plus-insert">Insert image</button>
+          <button type="button" class="plus-generate">Generate image</button>
+        </div>
+      </div>
       <input type="file" class="composer-file" accept="image/*" multiple hidden>
       <textarea id="solo-message" name="text" rows="1" class="form-control" placeholder="Send a message…" autofocus aria-label="Message"></textarea>
       <button class="btn btn-primary send-btn" type="submit" aria-label="Send message">↑</button>
@@ -233,9 +285,14 @@
   const composerForm = document.querySelector(".composer");
   const textarea = composerForm.querySelector("textarea");
   const plusButton = composerForm.querySelector(".composer-plus");
+  const plusMenu = composerForm.querySelector(".plus-menu");
+  const plusWrap = composerForm.querySelector(".composer-plus-wrap");
+  const insertBtn = composerForm.querySelector(".plus-insert");
+  const generateBtn = composerForm.querySelector(".plus-generate");
   const fileInput = composerForm.querySelector(".composer-file");
   const attachmentsWrap = composerForm.querySelector(".composer-attachments");
   let pendingAttachments = [];
+  let generationMode = false;
 
   function autoSizeTextarea(el) {
     if (!el) return;
@@ -254,7 +311,25 @@
       composerForm.requestSubmit();
     }
   });
-  plusButton.addEventListener("click", () => fileInput.click());
+  plusButton.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    plusMenu.hidden = !plusMenu.hidden;
+  });
+  document.addEventListener("click", (e) => {
+    if (!plusWrap.contains(e.target)) {
+      plusMenu.hidden = true;
+    }
+  });
+  insertBtn.addEventListener("click", () => {
+    plusMenu.hidden = true;
+    fileInput.click();
+  });
+  generateBtn.addEventListener("click", () => {
+    plusMenu.hidden = true;
+    generationMode = true;
+    renderAttachments();
+  });
   fileInput.addEventListener("change", () => {
     const files = Array.from(fileInput.files || []);
     files.forEach((file) => {
@@ -325,6 +400,16 @@
 
   function renderAttachments() {
     attachmentsWrap.innerHTML = "";
+    if (generationMode) {
+      const genChip = document.createElement("div");
+      genChip.className = "generation-chip";
+      genChip.innerHTML = `Image Generation <button type="button" aria-label="Cancel generation">×</button>`;
+      genChip.querySelector("button").addEventListener("click", () => {
+        generationMode = false;
+        renderAttachments();
+      });
+      attachmentsWrap.appendChild(genChip);
+    }
     pendingAttachments.forEach((att, idx) => {
       const chip = document.createElement("div");
       chip.className = "attachment-chip";
@@ -338,7 +423,7 @@
       });
       attachmentsWrap.appendChild(chip);
     });
-    attachmentsWrap.hidden = pendingAttachments.length === 0;
+    attachmentsWrap.hidden = !generationMode && pendingAttachments.length === 0;
   }
 
   function buildPayload(text) {
@@ -354,6 +439,7 @@
 
   function clearAttachments() {
     pendingAttachments = [];
+    generationMode = false;
     attachmentsWrap.innerHTML = "";
     attachmentsWrap.hidden = true;
   }
@@ -403,13 +489,47 @@
 
     const rawText = textarea.value || "";
     const trimmed = rawText.trim();
-    const payload = buildPayload(trimmed);
-    if (!payload) return;
+    document.querySelector(".empty-state")?.remove();
+    if (!trimmed && !generationMode && pendingAttachments.length === 0) return;
+    if (generationMode && !trimmed) {
+      alert("Enter a description to generate an image.");
+      return;
+    }
 
     // clear immediately; wait for echoed message to avoid duplicates
     textarea.value = "";
     autoSizeTextarea(textarea);
     waitingForOwnEcho = true;
+
+    if (generationMode) {
+      try {
+        const resp = await fetch("{{ url_for('generate_image') }}", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Requested-With": "XMLHttpRequest"
+          },
+          body: JSON.stringify({ prompt: trimmed })
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.image) throw new Error(data.error || "Image generation failed.");
+        pendingAttachments.push({ name: trimmed.slice(0, 40) || "generated-image", data: data.image });
+        generationMode = false;
+        renderAttachments();
+      } catch (err) {
+        waitingForOwnEcho = false;
+        generationMode = false;
+        renderAttachments();
+        alert(err.message || "Image generation failed.");
+        return;
+      }
+    }
+
+    const payload = buildPayload(trimmed);
+    if (!payload) {
+      waitingForOwnEcho = false;
+      return;
+    }
 
     try {
       await fetch("{{ url_for('solo_message', sid=room.sid) }}", {

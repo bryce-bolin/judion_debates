@@ -9,6 +9,17 @@
     height: 100%;
   }
   #messages { flex: 1; overflow-y: auto; padding-bottom: 96px; }
+  .phase-banner{
+    display:inline-block;
+    background:#101010;
+    border:1px solid #1f1f1f;
+    border-radius:999px;
+    padding:.2rem .9rem;
+    font-size:.82rem;
+    letter-spacing:.05em;
+    text-transform:uppercase;
+    color:#cbd5f5;
+  }
 
   /* Keep rows tidy and NEVER stretch bubbles vertically */
   .row-user,
@@ -81,9 +92,10 @@
     border:1px solid #1f1f1f;
     border-radius:30px;
     padding:.1rem .35rem .1rem .35rem;
-    overflow:hidden;
+    overflow:visible;
     order:2;
   }
+  .composer-plus-wrap{ position:relative; display:flex; align-items:center; overflow:visible; }
   .composer-plus{
     border:none;
     background:transparent;
@@ -102,6 +114,31 @@
     -webkit-appearance:none;
     appearance:none;
   }
+  .plus-menu{
+    position:absolute;
+    bottom:110%;
+    left:0;
+    background:#101010;
+    border:1px solid #2a2a2a;
+    border-radius:10px;
+    padding:.3rem;
+    min-width:140px;
+    box-shadow:0 8px 20px rgba(0,0,0,.45);
+    z-index:1000;
+  }
+  .plus-menu[hidden]{ display:none; }
+  .plus-menu button{
+    width:100%;
+    background:none;
+    border:none;
+    color:#ddd;
+    text-align:left;
+    padding:.25rem .15rem;
+    border-radius:6px;
+    font-size:.85rem;
+    cursor:pointer;
+  }
+  .plus-menu button:hover{ background:#1f1f1f; color:#fff; }
   .composer-plus:active{ transform:scale(.95); }
   .composer textarea{
     flex:1;
@@ -135,13 +172,13 @@
   }
   .composer .send-btn:disabled{ opacity:.4; cursor:not-allowed; }
   .composer .send-btn:active{ transform:scale(.96); }
-    .composer-attachments{
-      display:flex;
-      gap:.4rem;
-      flex-wrap:wrap;
-      margin-bottom:.35rem;
-      order:1;
-    }
+  .composer-attachments{
+    display:flex;
+    gap:.4rem;
+    flex-wrap:wrap;
+    margin-bottom:.35rem;
+    order:1;
+  }
   .composer-attachments[hidden]{ display:none; }
   .attachment-chip{
     position:relative;
@@ -171,6 +208,26 @@
     line-height:1;
     cursor:pointer;
   }
+  .generation-chip{
+    background:#0d3b66;
+    color:#cce4ff;
+    padding:.25rem .7rem;
+    border-radius:999px;
+    font-size:.78rem;
+    letter-spacing:.08em;
+    text-transform:uppercase;
+    display:inline-flex;
+    align-items:center;
+    gap:.35rem;
+  }
+  .generation-chip button{
+    border:none;
+    background:none;
+    color:#cce4ff;
+    font-size:.85rem;
+    cursor:pointer;
+    padding:0;
+  }
 </style>
 
 <div class="chat-wrap">
@@ -178,15 +235,22 @@
     <h3 class="mb-1">{{ room.title }}</h3>
     {% if room.description %}<p class="muted mb-2">{{ room.description }}</p>{% endif %}
     <p class="small text-secondary">Room code: <strong>{{ room.code }}</strong></p>
+    <div class="phase-banner" id="phaseInfo">{{ phase_label }}</div>
   </div>
 
   <div id="messages">
     {% for m in messages %}
       {% set is_user = (m.role == 'user' and m.user == current_user.username) %}
-      {% set is_judge = (m.user or '')|lower == 'judge' %}
+      {% set lower_user = (m.user or '')|lower %}
+      {% set is_judge = lower_user == 'judge' %}
+      {% set is_system = lower_user == 'system' %}
       {% if is_judge %}
         <div class="row-assist mb-2">
           <div class="ai-line md">{{ m.text | markdown | safe }}</div>
+        </div>
+      {% elif is_system %}
+        <div class="row-assist mb-2">
+          <div class="ai-line md"><em>{{ m.text }}</em></div>
         </div>
       {% else %}
         <div class="{{ 'row-user' if is_user else 'row-assist' }} mb-2">
@@ -202,14 +266,27 @@
     {% endfor %}
   </div>
 
-  <form class="composer" action="{{ url_for('debate_message', code=room.code) }}" method="post">
+  <form class="composer"
+        action="{{ url_for('debate_message', code=room.code) }}"
+        method="post"
+        data-phase="{{ phase }}"
+        data-has-claim="{{ 'true' if has_claim else 'false' }}"
+        data-has-counter="{{ 'true' if has_counter else 'false' }}"
+        data-username="{{ current_user.username }}">
     <label class="sr-only" for="debate-message">Message</label>
+    <p class="text-muted small mb-2" id="composerStatus" {% if not status_message %}hidden{% endif %}>{{ status_message }}</p>
     <div class="composer-attachments" hidden aria-live="polite"></div>
     <div class="composer-shell">
-      <button type="button" class="composer-plus" aria-label="Add image">+</button>
+      <div class="composer-plus-wrap">
+        <button type="button" class="composer-plus" aria-label="Add options" {% if not can_submit %}disabled{% endif %}>+</button>
+        <div class="plus-menu" hidden>
+          <button type="button" class="plus-insert">Insert image</button>
+          <button type="button" class="plus-generate">Generate image</button>
+        </div>
+      </div>
       <input type="file" class="composer-file" accept="image/*" multiple hidden>
-      <textarea id="debate-message" name="text" rows="1" class="form-control" placeholder="Write an argument or counterargument…" aria-label="Message"></textarea>
-      <button class="btn btn-primary send-btn" type="submit" aria-label="Send message">↑</button>
+      <textarea id="debate-message" name="text" rows="1" class="form-control" placeholder="{% if phase == 'claim' %}Submit your claim...{% elif phase == 'counterclaim' %}Share your counterclaim...{% else %}Debate finished. Awaiting judge verdict.{% endif %}" aria-label="Message" {% if not can_submit %}disabled{% endif %}></textarea>
+      <button class="btn btn-primary send-btn" type="submit" aria-label="Send message" {% if not can_submit %}disabled{% endif %}>↑</button>
     </div>
   </form>
 </div>
@@ -233,9 +310,71 @@
   const composerForm = document.querySelector(".composer");
   const textarea     = composerForm.querySelector("textarea");
   const plusButton   = composerForm.querySelector(".composer-plus");
+  const plusMenu     = composerForm.querySelector(".plus-menu");
+  const plusWrap     = composerForm.querySelector(".composer-plus-wrap");
+  const insertBtn    = composerForm.querySelector(".plus-insert");
+  const generateBtn  = composerForm.querySelector(".plus-generate");
   const fileInput    = composerForm.querySelector(".composer-file");
   const attachmentsWrap = composerForm.querySelector(".composer-attachments");
+  const sendBtn = composerForm.querySelector(".send-btn");
+  const composerStatusEl = document.getElementById("composerStatus");
+  const phaseLabelEl = document.getElementById("phaseInfo");
   let pendingAttachments = [];
+  let generationMode = false;
+
+  function currentPhase() {
+    return composerForm.dataset.phase || "claim";
+  }
+
+  function hasSubmittedClaim() {
+    return composerForm.dataset.hasClaim === "true";
+  }
+
+  function hasSubmittedCounter() {
+    return composerForm.dataset.hasCounter === "true";
+  }
+
+  function phasePlaceholder() {
+    const phase = currentPhase();
+    if (phase === "claim") return "Submit your claim...";
+    if (phase === "counterclaim") return "Submit your counterclaim...";
+    return "Debate finished. Awaiting judge verdict.";
+  }
+
+  function updateComposerState() {
+    const phase = currentPhase();
+    let canSubmit = true;
+    if (phase === "claim" && hasSubmittedClaim()) canSubmit = false;
+    else if (phase === "counterclaim" && hasSubmittedCounter()) canSubmit = false;
+    else if (phase === "finished") canSubmit = false;
+
+    composerForm.dataset.canSubmit = String(canSubmit);
+    textarea.disabled = !canSubmit;
+    sendBtn.disabled = !canSubmit;
+    plusButton.disabled = !canSubmit;
+    if (!canSubmit) plusMenu.hidden = true;
+    textarea.placeholder = phasePlaceholder();
+
+    let status = "";
+    if (phase === "claim" && hasSubmittedClaim()) {
+      status = "Waiting for other participants to submit their claims.";
+    } else if (phase === "counterclaim" && hasSubmittedCounter()) {
+      status = "Waiting for other participants to submit their counterclaims.";
+    } else if (phase === "finished") {
+      status = "";
+    }
+    if (composerStatusEl) {
+      composerStatusEl.textContent = status;
+      composerStatusEl.hidden = !status;
+    }
+    if (phaseLabelEl) {
+      if (phase === "claim") phaseLabelEl.textContent = "Claim phase";
+      else if (phase === "counterclaim") phaseLabelEl.textContent = "Counterclaim phase";
+      else phaseLabelEl.textContent = "Debate finished";
+    }
+  }
+
+  updateComposerState();
 
   function autoSizeTextarea(el) {
     if (!el) return;
@@ -254,7 +393,26 @@
       composerForm.requestSubmit();
     }
   });
-  plusButton.addEventListener("click", () => fileInput.click());
+  plusButton.addEventListener("click", (e) => {
+    if (plusButton.disabled) return;
+    e.preventDefault();
+    e.stopPropagation();
+    plusMenu.hidden = !plusMenu.hidden;
+  });
+  document.addEventListener("click", (e) => {
+    if (!plusWrap.contains(e.target)) {
+      plusMenu.hidden = true;
+    }
+  });
+  insertBtn.addEventListener("click", () => {
+    plusMenu.hidden = true;
+    fileInput.click();
+  });
+  generateBtn.addEventListener("click", () => {
+    plusMenu.hidden = true;
+    generationMode = true;
+    renderAttachments();
+  });
   fileInput.addEventListener("change", () => {
     const files = Array.from(fileInput.files || []);
     files.forEach((file) => {
@@ -321,6 +479,16 @@
 
   function renderAttachments() {
     attachmentsWrap.innerHTML = "";
+    if (generationMode) {
+    const genChip = document.createElement("div");
+    genChip.className = "generation-chip";
+    genChip.innerHTML = `Image Generation <button type="button" aria-label="Cancel generation">×</button>`;
+    genChip.querySelector("button").addEventListener("click", () => {
+      generationMode = false;
+      renderAttachments();
+    });
+    attachmentsWrap.appendChild(genChip);
+    }
     pendingAttachments.forEach((att, idx) => {
       const chip = document.createElement("div");
       chip.className = "attachment-chip";
@@ -334,7 +502,7 @@
       });
       attachmentsWrap.appendChild(chip);
     });
-    attachmentsWrap.hidden = pendingAttachments.length === 0;
+    attachmentsWrap.hidden = !generationMode && pendingAttachments.length === 0;
   }
 
   function buildPayload(text) {
@@ -350,6 +518,7 @@
 
   function clearAttachments() {
     pendingAttachments = [];
+    generationMode = false;
     attachmentsWrap.innerHTML = "";
     attachmentsWrap.hidden = true;
   }
@@ -358,11 +527,13 @@
   let typingEl = null;
   function showTypingAtEnd() {
     hideTyping();
-    typingEl = document.createElement("div");
-    typingEl.className = "row-assist mb-2";
-    typingEl.innerHTML = `
-      <div class="ai-line" data-typing="1"><em>Judge is typing...</em></div>`;
-    messagesDiv.appendChild(typingEl);
+    const phase = currentPhase();
+    if (phase === "counterclaim") {
+      typingEl = document.createElement("div");
+      typingEl.className = "row-assist mb-2";
+      typingEl.innerHTML = `<div class="ai-line" data-typing="1"><em>Judge is typing...</em></div>`;
+      messagesDiv.appendChild(typingEl);
+    }
     messagesDiv.scrollTop = messagesDiv.scrollHeight;
   }
   function hideTyping() {
@@ -394,20 +565,74 @@
     }
   });
 
+  socket.on("phase_update", (payload) => {
+    if (!payload || !payload.phase) return;
+    composerForm.dataset.phase = payload.phase;
+    if (payload.phase === "counterclaim") {
+      composerForm.dataset.hasCounter = "false";
+      generationMode = false;
+      renderAttachments();
+    }
+    if (payload.phase === "finished") {
+      generationMode = false;
+      renderAttachments();
+    }
+    if (payload.phase === "claim") {
+      composerForm.dataset.hasClaim = "false";
+    }
+    updateComposerState();
+  });
+
   composerForm.addEventListener("submit", async (e) => {
     e.preventDefault();
     const rawText = textarea.value || "";
     const trimmed = rawText.trim();
-    const payload = buildPayload(trimmed);
-    if (!payload) return;
+    document.querySelector(".empty-state")?.remove();
+
+    if (!trimmed && !generationMode && pendingAttachments.length === 0) return;
+
+    if (generationMode && !trimmed) {
+      alert("Enter a description to generate an image.");
+      return;
+    }
 
     // Clear immediately; wait for server echo to append (prevents duplicates)
     textarea.value = "";
     autoSizeTextarea(textarea);
     waitingForOwnEcho = true;
 
+    if (generationMode) {
+      try {
+        const resp = await fetch("{{ url_for('generate_image') }}", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Requested-With": "XMLHttpRequest"
+          },
+          body: JSON.stringify({ prompt: trimmed })
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.image) throw new Error(data.error || "Image generation failed.");
+        pendingAttachments.push({ name: trimmed.slice(0, 40) || "generated-image", data: data.image });
+        generationMode = false;
+        renderAttachments();
+      } catch (err) {
+        waitingForOwnEcho = false;
+        generationMode = false;
+        renderAttachments();
+        alert(err.message || "Image generation failed.");
+        return;
+      }
+    }
+
+    const payload = buildPayload(trimmed);
+    if (!payload) {
+      waitingForOwnEcho = false;
+      return;
+    }
+
     try {
-      await fetch("{{ url_for('debate_message', code=room.code) }}", {
+      const resp = await fetch("{{ url_for('debate_message', code=room.code) }}", {
         method: "POST",
         headers: {
           "Content-Type": "application/x-www-form-urlencoded",
@@ -415,13 +640,24 @@
         },
         body: new URLSearchParams({ text: payload })
       });
+      if (!resp.ok) {
+        const msg = await resp.text();
+        throw new Error(msg || "Send failed");
+      }
       clearAttachments();
+      if (currentPhase() === "claim") {
+        composerForm.dataset.hasClaim = "true";
+      } else if (currentPhase() === "counterclaim") {
+        composerForm.dataset.hasCounter = "true";
+      }
+      updateComposerState();
       // Echo + judge reply will arrive via socket events
     } catch (err) {
       waitingForOwnEcho = false;
       hideTyping();
       appendMessage({ user: "System", text: "(Send failed. Please try again.)" }, false);
       console.error(err);
+      alert(err.message || "Send failed.");
     }
   });
 
